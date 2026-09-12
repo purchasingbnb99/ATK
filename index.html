@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f172a">
+<title>ATK Inventory</title>
+<link rel="stylesheet" href="./styles.css">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" defer>
+</script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer>
+</script>
+<script src="./app.js" defer></script>
+</head>
+<body>
+<div id="loginView" class="login">
+<div class="login-card">
+<h1>ATK Inventory</h1>
+<p>Sistem Persediaan ATK & Pengajuan Barang</p>
+<div id="loginErr" class="hidden" style="padding:9px;border-radius:9px;background:#fee2e2;color:#991b1b;font-size:12px;margin-bottom:10px">
+</div>
+<form id="loginForm" class="form">
+<div class="field">
+<label>Username</label>
+<input id="liUser" class="inp" autocomplete="username" required>
+</div>
+<div class="field">
+<label>Password</label>
+<input id="liPass" class="inp" type="password" autocomplete="current-password" required>
+</div>
+<button class="btn primary" type="submit">Login</button>
+</form>
+</div>
+</div>
+<div id="appView" class="hidden">
+<div class="shell">
+<aside id="side" class="side">
+<div class="brand">
+<h2>ATK Inventory</h2>
+<p>Stock & Request Management</p>
+</div>
+<nav id="nav" class="nav">
+</nav>
+<div class="userbox">
+<b id="uName">-</b>
+<span id="uRole">-</span>
+</div>
+</aside>
+<main class="main">
+<header class="top">
+<div style="display:flex;align-items:center;gap:8px">
+<button class="btn sm hamb" id="hamb">☰</button>
+<div>
+<b id="tt">Dashboard</b>
+<div id="ts" class="muted" style="font-size:10px">
+</div>
+</div>
+</div>
+<div style="display:flex;gap:7px">
+<button class="btn sm" id="pwBtn">Ganti Password</button>
+<button class="btn sm danger" id="logoutBtn">Logout</button>
+</div>
+</header>
+<section id="content" class="content">
+</section>
+</main>
+</div>
+</div>
+<div id="modal">
+</div>
+<div id="load" class="loading hidden">
+<div>
+<div class="spin">
+</div>
+<div style="font-size:11px;margin-top:8px">Memproses...</div>
+</div>
+</div>
+</body>
+</html>
