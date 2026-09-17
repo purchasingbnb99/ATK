@@ -1,0 +1,1641 @@
+/**
+ * ATK Inventory - Frontend
+ * Stage 4: Master Data
+ *
+ * Browser frontend. Never place Apps Script URL/API key here.
+ */
+
+(function () {
+  'use strict';
+
+  var STORAGE_KEYS = {
+    SESSION: 'atk_inventory_session'
+  };
+
+  var API_ENDPOINT = '/api/app';
+
+  var state = {
+    sessionToken: '',
+    expiresAt: '',
+    user: null,
+    activePage: 'dashboard',
+    initialized: false,
+    caches: {
+      categories: [],
+      suppliers: [],
+      products: [],
+      users: []
+    }
+  };
+
+  var NAV_ITEMS = {
+    ADMIN: [
+      { label: 'Dashboard', icon: '⌂', action: 'dashboard', section: 'utama' },
+      { label: 'Master Barang', icon: '▣', action: 'listProducts', section: 'master' },
+      { label: 'Kategori', icon: '◫', action: 'listCategories', section: 'master' },
+      { label: 'Supplier', icon: '▤', action: 'listSuppliers', section: 'master' },
+      { label: 'User Management', icon: '♙', action: 'listUsers', section: 'master' },
+      { label: 'Barang Masuk', icon: '↓', action: 'receiveStock', section: 'persediaan' },
+      { label: 'Barcode Scanner', icon: '⌕', action: 'barcodeScanner', section: 'persediaan' },
+      { label: 'Adjustment / Opname', icon: '±', action: 'adjustStock', section: 'persediaan' },
+      { label: 'Histori Mutasi', icon: '↔', action: 'listMovements', section: 'persediaan' },
+      { label: 'Rekomendasi Order', icon: '◇', action: 'reorderRecommendations', section: 'pengadaan' },
+      { label: 'Purchase Order', icon: '▤', action: 'listPurchaseOrders', section: 'pengadaan' },
+      { label: 'Penerimaan PO', icon: '✓', action: 'receivePurchaseOrder', section: 'pengadaan' },
+      { label: 'Approval Pengajuan', icon: '✓', action: 'listRequests', section: 'pengajuan' },
+      { label: 'Laporan', icon: '▥', action: 'stockReport', section: 'laporan' },
+      { label: 'Import Excel', icon: '⇧', action: 'bulkUpsertProducts', section: 'tools' },
+      { label: 'Export Excel', icon: '⇩', action: 'exportExcel', section: 'tools' },
+      { label: 'Change Password', icon: '⚿', action: 'changePassword', section: 'akun' }
+    ],
+    STAFF: [
+      { label: 'Dashboard', icon: '⌂', action: 'dashboard', section: 'utama' },
+      { label: 'Cari Barang', icon: '⌕', action: 'searchProducts', section: 'barang' },
+      { label: 'Scan Barcode', icon: '▦', action: 'barcodeScanner', section: 'barang' },
+      { label: 'Buat Pengajuan', icon: '+', action: 'createRequest', section: 'pengajuan' },
+      { label: 'Pengajuan Saya', icon: '≡', action: 'myRequests', section: 'pengajuan' },
+      { label: 'Print Pengajuan', icon: '▧', action: 'printRequests', section: 'pengajuan' },
+      { label: 'Change Password', icon: '⚿', action: 'changePassword', section: 'akun' }
+    ]
+  };
+
+  var SECTION_LABELS = {
+    utama: 'Utama',
+    master: 'Master Data',
+    persediaan: 'Persediaan',
+    pengadaan: 'Pengadaan',
+    pengajuan: 'Pengajuan',
+    laporan: 'Laporan',
+    tools: 'Tools',
+    barang: 'Barang',
+    akun: 'Akun'
+  };
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  async function init() {
+    bindStaticEvents();
+    setConnectionStatus('checking');
+    await restoreSession();
+    state.initialized = true;
+  }
+
+  function bindStaticEvents() {
+    var loginForm = document.getElementById('loginForm');
+    if (loginForm) loginForm.addEventListener('submit', handleLoginSubmit);
+
+    var logoutButton = document.getElementById('logoutButton');
+    if (logoutButton) logoutButton.addEventListener('click', handleLogout);
+
+    var menuButton = document.getElementById('menuButton');
+    if (menuButton) menuButton.addEventListener('click', openSidebar);
+
+    var closeSidebarButton = document.getElementById('closeSidebarButton');
+    if (closeSidebarButton) closeSidebarButton.addEventListener('click', closeSidebar);
+
+    var overlay = document.getElementById('sidebarOverlay');
+    if (overlay) overlay.addEventListener('click', closeSidebar);
+  }
+
+  async function restoreSession() {
+    var raw = null;
+
+    try {
+      raw = window.localStorage.getItem(STORAGE_KEYS.SESSION);
+    } catch (err) {
+      raw = null;
+    }
+
+    if (!raw) {
+      showLogin();
+      return;
+    }
+
+    var saved;
+    try {
+      saved = JSON.parse(raw);
+    } catch (err2) {
+      clearSession();
+      showLogin();
+      return;
+    }
+
+    if (!saved || !saved.sessionToken) {
+      clearSession();
+      showLogin();
+      return;
+    }
+
+    state.sessionToken = String(saved.sessionToken);
+    state.expiresAt = String(saved.expiresAt || '');
+
+    try {
+      var result = await apiRequest('me', {}, false);
+
+      if (!result.ok || !result.data || !result.data.user) {
+        clearSession();
+        showLogin();
+        return;
+      }
+
+      state.user = result.data.user;
+      state.expiresAt = String(result.data.expiresAt || state.expiresAt);
+
+      persistSession();
+      showMain();
+    } catch (error) {
+      clearSession();
+      showLogin();
+    }
+  }
+
+  async function handleLoginSubmit(event) {
+    event.preventDefault();
+
+    var usernameInput = document.getElementById('loginUsername');
+    var passwordInput = document.getElementById('loginPassword');
+    var button = document.getElementById('loginButton');
+    var errorBox = document.getElementById('loginError');
+
+    var username = String(usernameInput.value || '').trim();
+    var password = String(passwordInput.value || '');
+
+    hideElement(errorBox);
+
+    if (!username || !password) {
+      showMessageElement(errorBox, 'Username dan password wajib diisi.', 'error');
+      return;
+    }
+
+    setButtonLoading(button, true);
+
+    try {
+      var result = await apiRequest('login', {
+        username: username,
+        password: password
+      }, true);
+
+      if (!result.ok || !result.data || !result.data.sessionToken) {
+        throw {
+          code: 'LOGIN_FAILED',
+          message: extractErrorMessage(result) || 'Login gagal.',
+          status: 401
+        };
+      }
+
+      state.sessionToken = String(result.data.sessionToken);
+      state.expiresAt = String(result.data.expiresAt || '');
+      state.user = result.data.user || null;
+
+      persistSession();
+      passwordInput.value = '';
+      showMain();
+    } catch (error) {
+      showMessageElement(errorBox, getFriendlyError(error), 'error');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  async function handleLogout() {
+    var token = state.sessionToken;
+    clearSession();
+    showLogin();
+
+    if (token) {
+      try {
+        await apiRequest('logout', {}, false, token);
+      } catch (err) {
+        /* Local session already cleared. */
+      }
+    }
+  }
+
+  async function apiRequest(action, data, includeCredentials, tokenOverride) {
+    var payload = {
+      action: action,
+      data: data || {}
+    };
+
+    if (includeCredentials !== false) {
+      payload.sessionToken = tokenOverride || state.sessionToken || '';
+    }
+
+    var response;
+
+    try {
+      response = await fetch(API_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+    } catch (networkError) {
+      setConnectionStatus('offline');
+      throw {
+        code: 'NETWORK_ERROR',
+        message: 'Tidak dapat terhubung ke server. Periksa koneksi internet.',
+        status: 0
+      };
+    }
+
+    var rawText = await response.text();
+    var result = null;
+
+    if (rawText) {
+      try {
+        result = JSON.parse(rawText);
+      } catch (parseError) {
+        setConnectionStatus('error');
+        throw {
+          code: 'INVALID_JSON',
+          message: 'Server mengembalikan respons yang bukan JSON valid.',
+          status: response.status
+        };
+      }
+    }
+
+    if (!result || typeof result !== 'object') {
+      setConnectionStatus('error');
+      throw {
+        code: 'INVALID_JSON',
+        message: 'Respons server tidak valid.',
+        status: response.status
+      };
+    }
+
+    if (response.ok && result.ok === true) {
+      setConnectionStatus('online');
+      return result;
+    }
+
+    if (result.ok === false) {
+      var apiError = result.error || {};
+      var normalized = {
+        code: String(apiError.code || 'API_ERROR'),
+        message: String(apiError.message || 'Permintaan gagal.'),
+        status: Number(apiError.status || response.status || 500)
+      };
+
+      if ((normalized.code === 'SESSION_EXPIRED' || normalized.status === 401) &&
+          action !== 'login') {
+        handleSessionExpired();
+      }
+
+      throw normalized;
+    }
+
+    throw {
+      code: 'API_ERROR',
+      message: 'Format respons server tidak sesuai kontrak.',
+      status: response.status
+    };
+  }
+
+  function handleSessionExpired() {
+    clearSession();
+    showLogin();
+    showGlobalMessage('Session Anda sudah berakhir. Silakan login kembali.', 'warning');
+  }
+
+  function showLogin() {
+    hideElement(document.getElementById('loadingScreen'));
+    hideElement(document.getElementById('mainView'));
+    showElement(document.getElementById('loginView'));
+
+    var input = document.getElementById('loginUsername');
+    if (input) {
+      window.setTimeout(function () {
+        input.focus();
+      }, 0);
+    }
+  }
+
+  function showMain() {
+    hideElement(document.getElementById('loadingScreen'));
+    hideElement(document.getElementById('loginView'));
+    showElement(document.getElementById('mainView'));
+
+    if (!state.user) {
+      state.user = {
+        name: 'User',
+        username: 'user',
+        role: '',
+        department: ''
+      };
+    }
+
+    applyUserIdentity();
+    buildNavigation();
+    renderPage('dashboard');
+    setConnectionStatus('online');
+  }
+
+  function applyUserIdentity() {
+    var user = state.user || {};
+    var name = String(user.name || user.username || 'User');
+    var role = String(user.role || '').toUpperCase();
+    var department = String(user.department || '-');
+    var initial = getInitials(name);
+
+    setText('sidebarUserName', name);
+    setText('sidebarUserDepartment', department);
+    setText('sidebarRole', role || '-');
+    setText('topUserName', name);
+    setText('topUserRole', role || '-');
+    setText('sidebarUserInitial', initial);
+    setText('topUserInitial', initial);
+  }
+
+  function buildNavigation() {
+    var nav = document.getElementById('mainNav');
+    if (!nav) return;
+
+    nav.innerHTML = '';
+
+    var role = String(state.user && state.user.role || '').toUpperCase();
+    var items = NAV_ITEMS[role] || [];
+    var currentSection = '';
+
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+
+      if (item.section !== currentSection) {
+        currentSection = item.section;
+
+        var section = document.createElement('div');
+        section.className = 'nav-section-label';
+        section.textContent = SECTION_LABELS[currentSection] || currentSection;
+        nav.appendChild(section);
+      }
+
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'nav-item';
+      button.setAttribute('data-action', item.action);
+      button.innerHTML =
+        '<span class="nav-icon">' + escapeHtml(item.icon) + '</span>' +
+        '<span>' + escapeHtml(item.label) + '</span>';
+
+      button.addEventListener('click', function () {
+        state.activePage = this.getAttribute('data-action') || 'dashboard';
+        renderPage(state.activePage);
+        closeSidebar();
+      });
+
+      nav.appendChild(button);
+    }
+
+    updateActiveNavigation();
+  }
+
+  function updateActiveNavigation() {
+    var buttons = document.querySelectorAll('.nav-item');
+
+    for (var i = 0; i < buttons.length; i++) {
+      var active = buttons[i].getAttribute('data-action') === state.activePage;
+      if (active) buttons[i].classList.add('active');
+      else buttons[i].classList.remove('active');
+    }
+  }
+
+  async function renderPage(action) {
+    var title = getPageTitle(action);
+    setText('pageTitle', title);
+
+    var content = document.getElementById('pageContent');
+    if (!content) return;
+
+    content.innerHTML =
+      '<div class="page-heading">' +
+      '<h3>' + escapeHtml(title) + '</h3>' +
+      '<p>Memuat data...</p>' +
+      '</div>';
+
+    updateActiveNavigation();
+
+    try {
+      if (action === 'dashboard') {
+        await renderDashboard(content);
+      } else if (action === 'listCategories') {
+        await renderCategories(content);
+      } else if (action === 'listSuppliers') {
+        await renderSuppliers(content);
+      } else if (action === 'listProducts') {
+        await renderProducts(content);
+      } else if (action === 'listUsers') {
+        await renderUsers(content);
+      } else if (action === 'searchProducts') {
+        renderSearchProducts(content);
+      } else if (action === 'receiveStock') {
+        await renderFinalReceiveStock(content);
+      } else if (action === 'adjustStock') {
+        await renderFinalAdjustment(content);
+      } else if (action === 'listMovements') {
+        await renderFinalMovements(content);
+      } else if (action === 'listRequests') {
+        await renderFinalRequests(content);
+      } else if (action === 'createRequest') {
+        await renderFinalCreateRequest(content);
+      } else if (action === 'barcodeScanner') {
+        await renderFinalScanner(content);
+      } else if (action === 'reorderRecommendations') {
+        await renderFinalReorder(content);
+      } else if (action === 'listPurchaseOrders') {
+        await renderFinalPO(content);
+      } else if (action === 'receivePurchaseOrder') {
+        await renderFinalPOReceipt(content);
+      } else if (action === 'stockReport') {
+        await renderFinalReports(content);
+      } else if (action === 'bulkUpsertProducts') {
+        await renderFinalImport(content);
+      } else if (action === 'exportExcel') {
+        await renderFinalExport(content);
+      } else if (action === 'printRequests') {
+        await renderFinalRequests(content, true);
+      } else if (action === 'changePassword') {
+        renderChangePassword(content);
+      } else {
+        renderPlaceholder(content, action, title);
+      }
+    } catch (error) {
+      content.innerHTML =
+        '<div class="placeholder-card">' +
+        '<h3>Gagal memuat data</h3>' +
+        '<p>' + escapeHtml(getFriendlyError(error)) + '</p>' +
+        '<button type="button" class="btn btn-secondary" id="retryPageButton">Coba lagi</button>' +
+        '</div>';
+
+      var retry = document.getElementById('retryPageButton');
+      if (retry) {
+        retry.addEventListener('click', function () {
+          renderPage(state.activePage);
+        });
+      }
+    }
+  }
+
+  async function renderDashboard(content) {
+    var result = await apiRequest('dashboard', {});
+    var summary = result.data && result.data.summary ? result.data.summary : {};
+    var role = String(state.user && state.user.role || '').toUpperCase();
+    var name = String(state.user && (state.user.name || state.user.username) || 'User');
+
+    content.innerHTML =
+      '<div class="page-heading">' +
+      '<h3>Dashboard</h3>' +
+      '<p>Ringkasan sistem ATK Inventory.</p>' +
+      '</div>' +
+      '<div class="welcome-card">' +
+      '<div><strong>Selamat datang, ' + escapeHtml(name) + '</strong>' +
+      '<p>Master Data sudah aktif. Kategori, Supplier, Barang, dan User Management terhubung ke Google Sheets melalui Vercel Proxy dan Google Apps Script.</p></div>' +
+      '<span class="badge">Stage 4</span>' +
+      '</div>' +
+      '<div class="stat-grid">' +
+      statCard('Barang Aktif', number(summary.products)) +
+      statCard('Kategori', number(summary.categories)) +
+      statCard('Supplier', number(summary.suppliers)) +
+      statCard('User', number(summary.users)) +
+      '</div>' +
+      '<div class="dashboard-grid">' +
+      '<div class="panel"><div class="panel-header"><h4 class="panel-title">Role Aktif</h4></div>' +
+      '<p class="panel-copy">' + escapeHtml(role || '-') + '</p></div>' +
+      '<div class="panel"><div class="panel-header"><h4 class="panel-title">Data Source</h4></div>' +
+      '<p class="panel-copy">DATABASE_ATK → Google Apps Script → Vercel → Browser</p></div>' +
+      '</div>';
+  }
+
+  async function renderCategories(content) {
+    var result = await apiRequest('listCategories', {});
+    state.caches.categories = result.data && result.data.items ? result.data.items : [];
+
+    content.innerHTML =
+      pageHeaderBlock(
+        'Kategori',
+        'Kelola kategori barang. Nama kategori harus unik.',
+        '<button class="btn btn-primary" type="button" id="addCategoryButton">+ Tambah Kategori</button>'
+      ) +
+      '<div class="panel">' +
+      tableToolbar('categorySearch', 'Cari kategori...') +
+      '<div class="table-wrap"><table class="data-table">' +
+      '<thead><tr><th>Nama Kategori</th><th>Status</th><th>Dibuat</th><th>Aksi</th></tr></thead>' +
+      '<tbody id="categoryTableBody">' + renderCategoryRows(state.caches.categories) + '</tbody>' +
+      '</table></div></div>';
+
+    bindCategoryEvents();
+  }
+
+  function renderCategoryRows(items, query) {
+    var search = String(query || '').toLowerCase().trim();
+    var filtered = items.filter(function (item) {
+      return !search || String(item.categoryName || '').toLowerCase().indexOf(search) >= 0;
+    });
+
+    if (!filtered.length) {
+      return emptyRow(4, 'Belum ada kategori.');
+    }
+
+    return filtered.map(function (item) {
+      return '<tr>' +
+        '<td><strong>' + escapeHtml(item.categoryName) + '</strong></td>' +
+        '<td>' + statusBadge(item.active) + '</td>' +
+        '<td>' + escapeHtml(formatDate(item.createdAt)) + '</td>' +
+        '<td><button type="button" class="btn btn-secondary btn-sm edit-category" data-id="' +
+        escapeHtml(item.categoryId) + '">Edit</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function bindCategoryEvents() {
+    var add = document.getElementById('addCategoryButton');
+    if (add) {
+      add.addEventListener('click', function () {
+        openCategoryModal(null);
+      });
+    }
+
+    var search = document.getElementById('categorySearch');
+    if (search) {
+      search.addEventListener('input', function () {
+        var body = document.getElementById('categoryTableBody');
+        body.innerHTML = renderCategoryRows(state.caches.categories, search.value);
+        bindCategoryEditButtons();
+      });
+    }
+
+    bindCategoryEditButtons();
+  }
+
+  function bindCategoryEditButtons() {
+    var buttons = document.querySelectorAll('.edit-category');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener('click', function () {
+        var id = this.getAttribute('data-id');
+        var item = state.caches.categories.find(function (row) {
+          return String(row.categoryId) === String(id);
+        });
+        openCategoryModal(item || null);
+      });
+    }
+  }
+
+  function openCategoryModal(item) {
+    openModal({
+      title: item ? 'Edit Kategori' : 'Tambah Kategori',
+      body:
+        '<form id="categoryForm">' +
+        '<div class="form-group"><label for="categoryNameInput">Nama Kategori</label>' +
+        '<input id="categoryNameInput" class="field" maxlength="100" required value="' +
+        escapeAttribute(item ? item.categoryName : '') + '"></div>' +
+        '<div id="modalMessage" class="form-message hidden" role="alert"></div>' +
+        '</form>',
+      footer:
+        '<button type="button" class="btn btn-secondary" data-close-modal>Batal</button>' +
+        '<button type="submit" form="categoryForm" class="btn btn-primary">' +
+        (item ? 'Simpan Perubahan' : 'Simpan') + '</button>'
+    });
+
+    document.getElementById('categoryForm').addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      var input = document.getElementById('categoryNameInput');
+      var message = document.getElementById('modalMessage');
+      var button = document.querySelector('#modalFooter button.btn-primary');
+
+      if (!input.value.trim()) {
+        showMessageElement(message, 'Nama kategori wajib diisi.', 'error');
+        return;
+      }
+
+      setButtonLoadingGeneric(button, true, item ? 'Menyimpan...' : 'Menyimpan...');
+
+      try {
+        await apiRequest(item ? 'updateCategory' : 'createCategory', {
+          categoryId: item ? item.categoryId : '',
+          categoryName: input.value.trim()
+        });
+
+        closeModal();
+        renderPage('listCategories');
+        showGlobalMessage(
+          item ? 'Kategori berhasil diperbarui.' : 'Kategori berhasil ditambahkan.',
+          'success'
+        );
+      } catch (error) {
+        showMessageElement(message, getFriendlyError(error), 'error');
+      } finally {
+        setButtonLoadingGeneric(button, false, item ? 'Simpan Perubahan' : 'Simpan');
+      }
+    });
+  }
+
+  async function renderSuppliers(content) {
+    var result = await apiRequest('listSuppliers', {});
+    state.caches.suppliers = result.data && result.data.items ? result.data.items : [];
+
+    content.innerHTML =
+      pageHeaderBlock(
+        'Supplier',
+        'Kelola data supplier. Kode supplier harus unik.',
+        '<button class="btn btn-primary" type="button" id="addSupplierButton">+ Tambah Supplier</button>'
+      ) +
+      '<div class="panel">' +
+      tableToolbar('supplierSearch', 'Cari kode, nama, PIC, telepon...') +
+      '<div class="table-wrap"><table class="data-table">' +
+      '<thead><tr><th>Kode</th><th>Nama</th><th>PIC</th><th>Telepon</th><th>Email</th><th>Status</th><th>Aksi</th></tr></thead>' +
+      '<tbody id="supplierTableBody">' + renderSupplierRows(state.caches.suppliers) + '</tbody>' +
+      '</table></div></div>';
+
+    var add = document.getElementById('addSupplierButton');
+    if (add) add.addEventListener('click', function () { openSupplierModal(null); });
+
+    var search = document.getElementById('supplierSearch');
+    if (search) {
+      search.addEventListener('input', function () {
+        var body = document.getElementById('supplierTableBody');
+        body.innerHTML = renderSupplierRows(state.caches.suppliers, search.value);
+        bindSupplierButtons();
+      });
+    }
+
+    bindSupplierButtons();
+  }
+
+  function renderSupplierRows(items, query) {
+    var search = String(query || '').toLowerCase().trim();
+
+    var filtered = items.filter(function (item) {
+      var haystack = [
+        item.code, item.name, item.pic, item.phone, item.email
+      ].join(' ').toLowerCase();
+      return !search || haystack.indexOf(search) >= 0;
+    });
+
+    if (!filtered.length) {
+      return emptyRow(7, 'Belum ada supplier.');
+    }
+
+    return filtered.map(function (item) {
+      return '<tr>' +
+        '<td><strong>' + escapeHtml(item.code) + '</strong></td>' +
+        '<td>' + escapeHtml(item.name) + '</td>' +
+        '<td>' + escapeHtml(item.pic || '-') + '</td>' +
+        '<td>' + escapeHtml(item.phone || '-') + '</td>' +
+        '<td>' + escapeHtml(item.email || '-') + '</td>' +
+        '<td>' + statusBadge(item.active) + '</td>' +
+        '<td><button type="button" class="btn btn-secondary btn-sm edit-supplier" data-id="' +
+        escapeHtml(item.supplierId) + '">Edit</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function bindSupplierButtons() {
+    var buttons = document.querySelectorAll('.edit-supplier');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener('click', function () {
+        var id = this.getAttribute('data-id');
+        var item = state.caches.suppliers.find(function (row) {
+          return String(row.supplierId) === String(id);
+        });
+        openSupplierModal(item || null);
+      });
+    }
+  }
+
+  function openSupplierModal(item) {
+    openModal({
+      title: item ? 'Edit Supplier' : 'Tambah Supplier',
+      body:
+        '<form id="supplierForm">' +
+        '<div class="form-grid">' +
+        fieldHtml('supplierCodeInput', 'Kode Supplier', item ? item.code : '', 40, true) +
+        fieldHtml('supplierNameInput', 'Nama Supplier', item ? item.name : '', 150, true) +
+        fieldHtml('supplierPicInput', 'PIC', item ? item.pic : '', 100, false) +
+        fieldHtml('supplierPhoneInput', 'Telepon', item ? item.phone : '', 50, false) +
+        fieldHtml('supplierEmailInput', 'Email', item ? item.email : '', 120, false, 'email') +
+        '</div>' +
+        '<div class="form-group"><label for="supplierAddressInput">Alamat</label>' +
+        '<textarea id="supplierAddressInput" class="field" rows="3" maxlength="500">' +
+        escapeHtml(item ? item.address : '') + '</textarea></div>' +
+        '<div id="modalMessage" class="form-message hidden" role="alert"></div>' +
+        '</form>',
+      footer:
+        '<button type="button" class="btn btn-secondary" data-close-modal>Batal</button>' +
+        '<button type="submit" form="supplierForm" class="btn btn-primary">Simpan</button>'
+    });
+
+    document.getElementById('supplierForm').addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      var message = document.getElementById('modalMessage');
+      var button = document.querySelector('#modalFooter button.btn-primary');
+
+      var data = {
+        supplierId: item ? item.supplierId : '',
+        code: document.getElementById('supplierCodeInput').value.trim(),
+        name: document.getElementById('supplierNameInput').value.trim(),
+        pic: document.getElementById('supplierPicInput').value.trim(),
+        phone: document.getElementById('supplierPhoneInput').value.trim(),
+        email: document.getElementById('supplierEmailInput').value.trim(),
+        address: document.getElementById('supplierAddressInput').value.trim()
+      };
+
+      setButtonLoadingGeneric(button, true, 'Menyimpan...');
+
+      try {
+        await apiRequest(item ? 'updateSupplier' : 'createSupplier', data);
+        closeModal();
+        renderPage('listSuppliers');
+        showGlobalMessage(
+          item ? 'Supplier berhasil diperbarui.' : 'Supplier berhasil ditambahkan.',
+          'success'
+        );
+      } catch (error) {
+        showMessageElement(message, getFriendlyError(error), 'error');
+      } finally {
+        setButtonLoadingGeneric(button, false, 'Simpan');
+      }
+    });
+  }
+
+  async function renderProducts(content) {
+    var results = await Promise.all([
+      apiRequest('listProducts', { includeInactive: true }),
+      apiRequest('listCategories', {}),
+      apiRequest('listSuppliers', {})
+    ]);
+
+    state.caches.products = results[0].data && results[0].data.items ? results[0].data.items : [];
+    state.caches.categories = results[1].data && results[1].data.items ? results[1].data.items : [];
+    state.caches.suppliers = results[2].data && results[2].data.items ? results[2].data.items : [];
+
+    content.innerHTML =
+      pageHeaderBlock(
+        'Master Barang',
+        'Kelola SKU, barcode, kategori, supplier, min/max stock, harga, dan lokasi. Current Stock tidak diedit dari sini.',
+        '<button class="btn btn-primary" type="button" id="addProductButton">+ Tambah Barang</button>'
+      ) +
+      '<div class="panel">' +
+      tableToolbar('productSearch', 'Cari SKU, barcode, nama barang...') +
+      '<div class="table-wrap"><table class="data-table">' +
+      '<thead><tr><th>SKU</th><th>Barcode</th><th>Nama Barang</th><th>Kategori</th><th>Supplier</th><th>Min</th><th>Max</th><th>Stok</th><th>Harga</th><th>Status</th><th>Aksi</th></tr></thead>' +
+      '<tbody id="productTableBody">' + renderProductRows(state.caches.products) + '</tbody>' +
+      '</table></div></div>';
+
+    document.getElementById('addProductButton').addEventListener('click', function () {
+      openProductModal(null);
+    });
+
+    document.getElementById('productSearch').addEventListener('input', function () {
+      document.getElementById('productTableBody').innerHTML =
+        renderProductRows(state.caches.products, this.value);
+      bindProductButtons();
+    });
+
+    bindProductButtons();
+  }
+
+  function renderProductRows(items, query) {
+    var search = String(query || '').toLowerCase().trim();
+
+    var filtered = items.filter(function (item) {
+      if (!search) return true;
+      return [
+        item.sku, item.barcode, item.name
+      ].join(' ').toLowerCase().indexOf(search) >= 0;
+    });
+
+    if (!filtered.length) {
+      return emptyRow(11, 'Belum ada barang.');
+    }
+
+    return filtered.map(function (item) {
+      var category = findCacheName(state.caches.categories, 'categoryId', item.categoryId, 'categoryName');
+      var supplier = findCacheName(state.caches.suppliers, 'supplierId', item.supplierId, 'name');
+
+      return '<tr>' +
+        '<td><strong>' + escapeHtml(item.sku) + '</strong></td>' +
+        '<td>' + escapeHtml(item.barcode) + '</td>' +
+        '<td>' + escapeHtml(item.name) + '<div class="muted-cell">' +
+        escapeHtml(item.unit) + ' · ' + escapeHtml(item.location) + '</div></td>' +
+        '<td>' + escapeHtml(category || '-') + '</td>' +
+        '<td>' + escapeHtml(supplier || '-') + '</td>' +
+        '<td>' + number(item.minStock) + '</td>' +
+        '<td>' + number(item.maxStock) + '</td>' +
+        '<td><strong>' + number(item.currentStock) + '</strong></td>' +
+        '<td>' + formatMoney(item.price) + '</td>' +
+        '<td>' + statusBadge(item.active) + '</td>' +
+        '<td>' +
+        '<div class="action-group">' +
+        '<button type="button" class="btn btn-secondary btn-sm edit-product" data-id="' + escapeAttribute(item.productId) + '">Edit</button>' +
+        '<button type="button" class="btn btn-danger btn-sm toggle-product" data-id="' + escapeAttribute(item.productId) + '">' +
+        (item.active ? 'Nonaktifkan' : 'Aktifkan') + '</button>' +
+        '</div>' +
+        '</td></tr>';
+    }).join('');
+  }
+
+  function bindProductButtons() {
+    var editButtons = document.querySelectorAll('.edit-product');
+    for (var i = 0; i < editButtons.length; i++) {
+      editButtons[i].addEventListener('click', function () {
+        var id = this.getAttribute('data-id');
+        var item = state.caches.products.find(function (row) {
+          return String(row.productId) === String(id);
+        });
+        openProductModal(item || null);
+      });
+    }
+
+    var toggleButtons = document.querySelectorAll('.toggle-product');
+    for (var j = 0; j < toggleButtons.length; j++) {
+      toggleButtons[j].addEventListener('click', async function () {
+        var id = this.getAttribute('data-id');
+        var item = state.caches.products.find(function (row) {
+          return String(row.productId) === String(id);
+        });
+
+        if (!item) return;
+
+        var actionText = item.active ? 'menonaktifkan' : 'mengaktifkan';
+        var confirmed = window.confirm(
+          'Yakin ingin ' + actionText + ' barang "' + item.name + '"?'
+        );
+
+        if (!confirmed) return;
+
+        this.disabled = true;
+
+        try {
+          await apiRequest('toggleProduct', { productId: id });
+          showGlobalMessage('Status barang berhasil diubah.', 'success');
+          renderPage('listProducts');
+        } catch (error) {
+          showGlobalMessage(getFriendlyError(error), 'error');
+          this.disabled = false;
+        }
+      });
+    }
+  }
+
+  function openProductModal(item) {
+    var categories = activeItems(state.caches.categories);
+    var suppliers = activeItems(state.caches.suppliers);
+
+    if (!categories.length || !suppliers.length) {
+      showGlobalMessage(
+        'Sebelum membuat barang, pastikan minimal ada 1 Kategori aktif dan 1 Supplier aktif.',
+        'warning'
+      );
+      return;
+    }
+
+    var categoryOptions = categories.map(function (row) {
+      return '<option value="' + escapeAttribute(row.categoryId) + '"' +
+        (item && String(item.categoryId) === String(row.categoryId) ? ' selected' : '') +
+        '>' + escapeHtml(row.categoryName) + '</option>';
+    }).join('');
+
+    var supplierOptions = suppliers.map(function (row) {
+      return '<option value="' + escapeAttribute(row.supplierId) + '"' +
+        (item && String(item.supplierId) === String(row.supplierId) ? ' selected' : '') +
+        '>' + escapeHtml(row.name) + ' (' + escapeHtml(row.code) + ')</option>';
+    }).join('');
+
+    openModal({
+      title: item ? 'Edit Barang' : 'Tambah Barang',
+      body:
+        '<form id="productForm">' +
+        '<div class="form-grid">' +
+        fieldHtml('productSkuInput', 'SKU', item ? item.sku : '', 60, true) +
+        fieldHtml('productBarcodeInput', 'Barcode', item ? item.barcode : '', 100, true) +
+        fieldHtml('productNameInput', 'Nama Barang', item ? item.name : '', 200, true) +
+        '<div class="form-group"><label for="productCategoryInput">Kategori</label>' +
+        '<select id="productCategoryInput" class="field" required>' +
+        '<option value="">Pilih kategori</option>' + categoryOptions + '</select></div>' +
+        fieldHtml('productUnitInput', 'Satuan', item ? item.unit : '', 40, true) +
+        fieldHtmlNumber('productMinInput', 'Min Stock', item ? item.minStock : 0, true) +
+        fieldHtmlNumber('productMaxInput', 'Max Stock', item ? item.maxStock : 1, true) +
+        fieldHtmlNumber('productPriceInput', 'Harga', item ? item.price : 0, true, 'number') +
+        '<div class="form-group"><label for="productSupplierInput">Supplier</label>' +
+        '<select id="productSupplierInput" class="field" required>' +
+        '<option value="">Pilih supplier</option>' + supplierOptions + '</select></div>' +
+        fieldHtml('productLocationInput', 'Lokasi', item ? item.location : '', 150, true) +
+        '</div>' +
+        '<div class="info-strip">Current Stock saat ini: <strong>' +
+        number(item ? item.currentStock : 0) +
+        '</strong>. Field ini hanya berubah melalui transaksi stok.</div>' +
+        '<div id="modalMessage" class="form-message hidden" role="alert"></div>' +
+        '</form>',
+      footer:
+        '<button type="button" class="btn btn-secondary" data-close-modal>Batal</button>' +
+        '<button type="submit" form="productForm" class="btn btn-primary">Simpan</button>'
+    });
+
+    document.getElementById('productForm').addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      var message = document.getElementById('modalMessage');
+      var button = document.querySelector('#modalFooter button.btn-primary');
+
+      var data = {
+        productId: item ? item.productId : '',
+        sku: document.getElementById('productSkuInput').value.trim(),
+        barcode: document.getElementById('productBarcodeInput').value.trim(),
+        name: document.getElementById('productNameInput').value.trim(),
+        categoryId: document.getElementById('productCategoryInput').value,
+        unit: document.getElementById('productUnitInput').value.trim(),
+        minStock: document.getElementById('productMinInput').value,
+        maxStock: document.getElementById('productMaxInput').value,
+        price: document.getElementById('productPriceInput').value,
+        supplierId: document.getElementById('productSupplierInput').value,
+        location: document.getElementById('productLocationInput').value.trim()
+      };
+
+      setButtonLoadingGeneric(button, true, 'Menyimpan...');
+
+      try {
+        await apiRequest(item ? 'updateProduct' : 'createProduct', data);
+        closeModal();
+        renderPage('listProducts');
+        showGlobalMessage(
+          item ? 'Barang berhasil diperbarui.' : 'Barang berhasil ditambahkan.',
+          'success'
+        );
+      } catch (error) {
+        showMessageElement(message, getFriendlyError(error), 'error');
+      } finally {
+        setButtonLoadingGeneric(button, false, 'Simpan');
+      }
+    });
+  }
+
+  async function renderUsers(content) {
+    var result = await apiRequest('listUsers', {});
+    state.caches.users = result.data && result.data.items ? result.data.items : [];
+
+    content.innerHTML =
+      pageHeaderBlock(
+        'User Management',
+        'Kelola akun Admin dan Staff. Password tidak pernah ditampilkan.',
+        '<button class="btn btn-primary" type="button" id="addUserButton">+ Tambah User</button>'
+      ) +
+      '<div class="panel">' +
+      tableToolbar('userSearch', 'Cari username, nama, email, department...') +
+      '<div class="table-wrap"><table class="data-table">' +
+      '<thead><tr><th>Username</th><th>Nama</th><th>Email</th><th>Role</th><th>Department</th><th>Status</th><th>Aksi</th></tr></thead>' +
+      '<tbody id="userTableBody">' + renderUserRows(state.caches.users) + '</tbody>' +
+      '</table></div></div>';
+
+    document.getElementById('addUserButton').addEventListener('click', function () {
+      openUserModal(null);
+    });
+
+    document.getElementById('userSearch').addEventListener('input', function () {
+      document.getElementById('userTableBody').innerHTML =
+        renderUserRows(state.caches.users, this.value);
+      bindUserButtons();
+    });
+
+    bindUserButtons();
+  }
+
+  function renderUserRows(items, query) {
+    var search = String(query || '').toLowerCase().trim();
+
+    var filtered = items.filter(function (item) {
+      return !search || [
+        item.username, item.name, item.email, item.department, item.role
+      ].join(' ').toLowerCase().indexOf(search) >= 0;
+    });
+
+    if (!filtered.length) return emptyRow(7, 'Belum ada user.');
+
+    return filtered.map(function (item) {
+      return '<tr>' +
+        '<td><strong>' + escapeHtml(item.username) + '</strong></td>' +
+        '<td>' + escapeHtml(item.name) + '</td>' +
+        '<td>' + escapeHtml(item.email || '-') + '</td>' +
+        '<td><span class="badge">' + escapeHtml(item.role) + '</span></td>' +
+        '<td>' + escapeHtml(item.department || '-') + '</td>' +
+        '<td>' + statusBadge(item.active) + '</td>' +
+        '<td><button type="button" class="btn btn-secondary btn-sm edit-user" data-id="' +
+        escapeAttribute(item.userId) + '">Edit</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function bindUserButtons() {
+    var buttons = document.querySelectorAll('.edit-user');
+
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener('click', function () {
+        var id = this.getAttribute('data-id');
+        var item = state.caches.users.find(function (row) {
+          return String(row.userId) === String(id);
+        });
+        openUserModal(item || null);
+      });
+    }
+  }
+
+  function openUserModal(item) {
+    openModal({
+      title: item ? 'Edit User' : 'Tambah User',
+      body:
+        '<form id="userForm">' +
+        '<div class="form-grid">' +
+        fieldHtml('userUsernameInput', 'Username', item ? item.username : '', 80, true) +
+        fieldHtml('userNameInput', 'Nama', item ? item.name : '', 150, true) +
+        fieldHtml('userEmailInput', 'Email', item ? item.email : '', 120, false, 'email') +
+        '<div class="form-group"><label for="userRoleInput">Role</label>' +
+        '<select id="userRoleInput" class="field" required>' +
+        '<option value="STAFF"' + (item && item.role === 'STAFF' ? ' selected' : '') + '>STAFF</option>' +
+        '<option value="ADMIN"' + (item && item.role === 'ADMIN' ? ' selected' : '') + '>ADMIN</option>' +
+        '</select></div>' +
+        fieldHtml('userDepartmentInput', 'Department', item ? item.department : '', 120, false) +
+        fieldHtml('userPasswordInput', item ? 'Password Baru (opsional)' : 'Password', '', 120, !item, 'password') +
+        '</div>' +
+        '<label class="checkbox-row"><input id="userActiveInput" type="checkbox" ' +
+        ((!item || item.active) ? 'checked' : '') + '> User aktif</label>' +
+        '<div class="info-strip">Password disimpan sebagai salted hash; password lama tidak dapat dilihat.</div>' +
+        '<div id="modalMessage" class="form-message hidden" role="alert"></div>' +
+        '</form>',
+      footer:
+        '<button type="button" class="btn btn-secondary" data-close-modal>Batal</button>' +
+        '<button type="submit" form="userForm" class="btn btn-primary">Simpan</button>'
+    });
+
+    document.getElementById('userForm').addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      var message = document.getElementById('modalMessage');
+      var button = document.querySelector('#modalFooter button.btn-primary');
+
+      var data = {
+        userId: item ? item.userId : '',
+        username: document.getElementById('userUsernameInput').value.trim(),
+        name: document.getElementById('userNameInput').value.trim(),
+        email: document.getElementById('userEmailInput').value.trim(),
+        role: document.getElementById('userRoleInput').value,
+        department: document.getElementById('userDepartmentInput').value.trim(),
+        password: document.getElementById('userPasswordInput').value,
+        active: document.getElementById('userActiveInput').checked
+      };
+
+      setButtonLoadingGeneric(button, true, 'Menyimpan...');
+
+      try {
+        await apiRequest('saveUser', data);
+        closeModal();
+        renderPage('listUsers');
+        showGlobalMessage(
+          item ? 'User berhasil diperbarui.' : 'User berhasil ditambahkan.',
+          'success'
+        );
+      } catch (error) {
+        showMessageElement(message, getFriendlyError(error), 'error');
+      } finally {
+        setButtonLoadingGeneric(button, false, 'Simpan');
+      }
+    });
+  }
+
+  function renderSearchProducts(content) {
+    content.innerHTML =
+      pageHeaderBlock(
+        'Cari Barang',
+        'Pencarian berdasarkan SKU, barcode, atau nama barang.',
+        ''
+      ) +
+      '<div class="panel">' +
+      '<div class="search-row">' +
+      '<input id="searchProductInput" class="field" placeholder="Contoh: ATK-001 / 899... / pulpen">' +
+      '<button id="searchProductButton" type="button" class="btn btn-primary">Cari</button>' +
+      '</div>' +
+      '<div class="table-wrap search-result-wrap"><table class="data-table">' +
+      '<thead><tr><th>SKU</th><th>Barcode</th><th>Nama</th><th>Unit</th><th>Stok</th><th>Lokasi</th></tr></thead>' +
+      '<tbody id="searchProductBody">' + emptyRow(6, 'Masukkan kata pencarian.') + '</tbody>' +
+      '</table></div></div>';
+
+    var input = document.getElementById('searchProductInput');
+    var button = document.getElementById('searchProductButton');
+
+    async function doSearch() {
+      var query = input.value.trim();
+      if (!query) {
+        document.getElementById('searchProductBody').innerHTML =
+          emptyRow(6, 'Masukkan kata pencarian.');
+        return;
+      }
+
+      button.disabled = true;
+
+      try {
+        var result = await apiRequest('searchProducts', { query: query });
+        var items = result.data && result.data.items ? result.data.items : [];
+
+        if (!items.length) {
+          document.getElementById('searchProductBody').innerHTML =
+            emptyRow(6, 'Barang tidak ditemukan.');
+          return;
+        }
+
+        document.getElementById('searchProductBody').innerHTML = items.map(function (item) {
+          return '<tr>' +
+            '<td><strong>' + escapeHtml(item.sku) + '</strong></td>' +
+            '<td>' + escapeHtml(item.barcode) + '</td>' +
+            '<td>' + escapeHtml(item.name) + '</td>' +
+            '<td>' + escapeHtml(item.unit) + '</td>' +
+            '<td><strong>' + number(item.currentStock) + '</strong></td>' +
+            '<td>' + escapeHtml(item.location) + '</td>' +
+            '</tr>';
+        }).join('');
+      } catch (error) {
+        showGlobalMessage(getFriendlyError(error), 'error');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    button.addEventListener('click', doSearch);
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') doSearch();
+    });
+  }
+
+  function renderChangePassword(content) {
+    content.innerHTML =
+      pageHeaderBlock('Change Password', 'Ganti password akun yang sedang login.', '') +
+      '<div class="panel narrow-panel">' +
+      '<form id="changePasswordForm">' +
+      fieldHtml('currentPasswordInput', 'Password Lama', '', 120, true, 'password') +
+      fieldHtml('newPasswordInput', 'Password Baru', '', 120, true, 'password') +
+      fieldHtml('confirmPasswordInput', 'Konfirmasi Password Baru', '', 120, true, 'password') +
+      '<div id="changePasswordMessage" class="form-message hidden" role="alert"></div>' +
+      '<button type="submit" class="btn btn-primary">Simpan Password</button>' +
+      '</form></div>';
+
+    document.getElementById('changePasswordForm').addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      var message = document.getElementById('changePasswordMessage');
+      var currentPassword = document.getElementById('currentPasswordInput').value;
+      var newPassword = document.getElementById('newPasswordInput').value;
+      var confirmPassword = document.getElementById('confirmPasswordInput').value;
+
+      if (newPassword.length < 8) {
+        showMessageElement(message, 'Password baru minimal 8 karakter.', 'error');
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        showMessageElement(message, 'Konfirmasi password tidak cocok.', 'error');
+        return;
+      }
+
+      try {
+        await apiRequest('changePassword', {
+          currentPassword: currentPassword,
+          newPassword: newPassword
+        });
+
+        showMessageElement(message, 'Password berhasil diubah.', 'success');
+        document.getElementById('changePasswordForm').reset();
+      } catch (error) {
+        showMessageElement(message, getFriendlyError(error), 'error');
+      }
+    });
+  }
+
+
+
+  /* ========================== FINAL UI MODULES ====================== */
+  async function renderFinalReceiveStock(content){
+    await ensureMasterCaches();
+    content.innerHTML=pageHeaderBlock('Barang Masuk','Tambah stok melalui transaksi IN. Current Stock akan berubah setelah transaksi disimpan.','')+
+      '<div class="panel narrow-panel"><form id="finalReceiveForm">'+
+      '<div class="form-group"><label>Barang</label><select id="frProduct" class="field" required>'+productOptions()+'</select></div>'+
+      '<div class="form-group"><label>Supplier</label><select id="frSupplier" class="field"><option value="">Tanpa supplier</option>'+activeSupplierOptions()+'</select></div>'+
+      '<div class="form-grid">'+numberFieldFinal('frQty','Qty',1)+fieldFinal('frDoc','Nomor Dokumen','',100,false)+ '<div class="form-group"><label>Tanggal</label><input id="frDate" class="field" type="date" value="'+todayFinal()+'" required></div></div>'+
+      '<div class="form-group"><label>Catatan</label><textarea id="frNote" class="field" maxlength="500"></textarea></div><div id="frMsg" class="form-message hidden"></div><button class="btn btn-primary">Simpan Barang Masuk</button></form></div>';
+    onFinal('finalReceiveForm','submit',async function(e){e.preventDefault();var btn=this.querySelector('button'),box=byIdFinal('frMsg');setBtnFinal(btn,true,'Menyimpan...');try{await apiFinal('receiveStock',{productId:valFinal('frProduct'),supplierId:valFinal('frSupplier'),qty:valFinal('frQty'),documentNo:valFinal('frDoc'),receiptDate:valFinal('frDate'),note:valFinal('frNote')});messageFinal(box,'Barang masuk berhasil disimpan.','success');showGlobalMessage('Stok bertambah.','success');this.reset();byIdFinal('frDate').value=todayFinal();await refreshProductsFinal();}catch(err){messageFinal(box,friendlyFinal(err),'error');}finally{setBtnFinal(btn,false,'Simpan Barang Masuk');}});
+  }
+
+  async function renderFinalAdjustment(content){
+    await ensureMasterCaches();
+    content.innerHTML=pageHeaderBlock('Adjustment / Opname','Samakan stok sistem dengan stok fisik; setiap selisih dicatat sebagai movement.','')+
+      '<div class="panel narrow-panel"><form id="finalAdjustForm">'+
+      '<div class="form-group"><label>Barang</label><select id="faProduct" class="field" required>'+productOptions()+'</select></div>'+
+      '<div class="form-group"><label>Mode</label><select id="faMode" class="field"><option>ADJUSTMENT</option><option>OPNAME</option></select></div>'+
+      numberFieldFinal('faPhysical','Physical Stock',0)+
+      '<div class="form-group"><label>Tanggal</label><input id="faDate" class="field" type="date" value="'+todayFinal()+'" required></div>'+fieldFinal('faReason','Alasan','',500,true)+
+      '<div id="faMsg" class="form-message hidden"></div><button class="btn btn-primary">Simpan</button></form></div>';
+    onFinal('faProduct','change',function(){var p=state.products.find(function(x){return String(x.productId)===String(valFinal('faProduct'));});if(p)byIdFinal('faPhysical').value=p.currentStock;});
+    onFinal('finalAdjustForm','submit',async function(e){e.preventDefault();var btn=this.querySelector('button'),box=byIdFinal('faMsg');setBtnFinal(btn,true,'Menyimpan...');try{await apiFinal('adjustStock',{productId:valFinal('faProduct'),physicalStock:valFinal('faPhysical'),mode:valFinal('faMode'),adjustmentDate:valFinal('faDate'),reason:valFinal('faReason')});messageFinal(box,'Transaksi berhasil disimpan.','success');showGlobalMessage('Stok sudah disesuaikan.','success');await refreshProductsFinal();}catch(err){messageFinal(box,friendlyFinal(err),'error');}finally{setBtnFinal(btn,false,'Simpan');}});
+  }
+
+  async function renderFinalMovements(content){
+    content.innerHTML=pageHeaderBlock('Histori Mutasi','Filter berdasarkan tanggal, SKU, nama, dan jenis movement.','<div class="report-actions"><button class="btn btn-secondary" id="fmPrint">Print</button><button class="btn btn-secondary" id="fmExport">Export Excel</button></div>')+
+      '<div class="panel"><div class="form-grid">'+fieldDateFinal('fmFrom','Dari')+fieldDateFinal('fmTo','Sampai')+fieldFinal('fmSku','SKU','',80,false)+fieldFinal('fmName','Nama Barang','',120,false)+ '<div class="form-group"><label>Jenis</label><select id="fmType" class="field"><option value="">Semua</option><option>IN</option><option>OUT</option><option>ADJUSTMENT</option><option>OPNAME</option></select></div></div><button class="btn btn-primary" id="fmLoad">Tampilkan</button><div class="table-wrap" style="margin-top:14px"><table class="data-table"><thead><tr><th>Tanggal</th><th>SKU</th><th>Barang</th><th>Jenis</th><th>Qty</th><th>Sebelum</th><th>Sesudah</th><th>User</th><th>Catatan</th></tr></thead><tbody id="fmBody">'+emptyRowFinal(9,'Klik Tampilkan.')+'</tbody></table></div></div>';
+    state.finalMovements=[];onFinal('fmLoad', 'click', load);onFinal('fmPrint','click',function(){printHtmlFinal('fmPrintArea','Histori Mutasi');});onFinal('fmExport','click',function(){exportExcelFinal('Histori-Mutasi',state.finalMovements);});
+    async function load(){try{var r=await apiFinal('listMovements',{dateFrom:valFinal('fmFrom'),dateTo:valFinal('fmTo'),sku:valFinal('fmSku'),productName:valFinal('fmName'),type:valFinal('fmType')});state.finalMovements=r.data.items||[];setHTMLFinal('fmBody',state.finalMovements.length?state.finalMovements.map(function(x){return '<tr><td>'+escFinal(x.movementDate)+'</td><td>'+escFinal(x.sku)+'</td><td>'+escFinal(x.productName)+'</td><td>'+escFinal(x.type)+'</td><td>'+fmtFinal(x.qty)+'</td><td>'+fmtFinal(x.stockBefore)+'</td><td>'+fmtFinal(x.stockAfter)+'</td><td>'+escFinal(x.userName)+'</td><td>'+escFinal(x.note||'-')+'</td></tr>';}).join(''):emptyRowFinal(9,'Tidak ada data.'));}catch(err){showGlobalMessage(friendlyFinal(err),'error');}}
+  }
+
+  async function renderFinalRequests(content,printOnly){
+    var r=await apiFinal('listRequests',{});state.requests=r.data.items||[];var admin=String(state.user.role).toUpperCase()==='ADMIN';
+    content.innerHTML=pageHeaderBlock(admin?'Approval Pengajuan':'Pengajuan Saya',admin?'Approve penuh, approve sebagian, atau reject dengan alasan.':'Lihat pengajuan sendiri dan batalkan yang masih MENUNGGU.',admin?'':'<button class="btn btn-primary no-print" id="frNewReq">+ Pengajuan</button>')+
+      '<div class="panel"><div class="table-wrap" id="requestPrintArea"><table class="data-table"><thead><tr><th>No</th><th>Tanggal</th><th>Staff</th><th>Dept</th><th>Items</th><th>Status</th><th class="no-print">Aksi</th></tr></thead><tbody id="frReqBody">'+requestRowsFinal()+'</tbody></table></div></div>';
+    onFinal('frNewReq','click',function(){state.activePage='createRequest';renderPage('createRequest');});bindFinalRequestButtons();if(printOnly){var p=document.createElement('button');p.className='btn btn-secondary no-print';p.textContent='Print';p.onclick=function(){printHtmlFinal('requestPrintArea','Pengajuan Barang');};document.querySelector('.flex-heading').appendChild(p);}
+  }
+
+  function requestRowsFinal(){var admin=String(state.user.role).toUpperCase()==='ADMIN';if(!state.requests.length)return emptyRowFinal(7,'Belum ada pengajuan.');return state.requests.map(function(x){var q=x.request;return '<tr><td><strong>'+escFinal(q.requestNo)+'</strong></td><td>'+escFinal(q.requestDate)+'</td><td>'+escFinal(q.staffName)+'</td><td>'+escFinal(q.department||'-')+'</td><td>'+fmtFinal(x.items.length)+'</td><td>'+statusFinal(q.status)+'</td><td class="no-print"><div class="action-group"><button class="btn btn-secondary btn-sm frView" data-id="'+escFinal(q.requestId)+'">Detail</button>'+(admin&&q.status==='MENUNGGU'?'<button class="btn btn-success btn-sm frApprove" data-id="'+escFinal(q.requestId)+'">Approve</button><button class="btn btn-danger btn-sm frReject" data-id="'+escFinal(q.requestId)+'">Reject</button>':'')+(!admin&&q.status==='MENUNGGU'?'<button class="btn btn-danger btn-sm frCancel" data-id="'+escFinal(q.requestId)+'">Batalkan</button>':'')+'</div></td></tr>';}).join('');}
+
+  function bindFinalRequestButtons(){document.querySelectorAll('.frView').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openRequestFinal(x);};});document.querySelectorAll('.frApprove').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openApproveFinal(x);};});document.querySelectorAll('.frReject').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openRejectFinal(x);};});document.querySelectorAll('.frCancel').forEach(function(b){b.onclick=async function(){if(!confirm('Batalkan pengajuan ini?'))return;try{await apiFinal('cancelRequest',{requestId:b.dataset.id});showGlobalMessage('Pengajuan dibatalkan.','success');renderPage('listRequests');}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});}
+
+  function openRequestFinal(x){if(!x)return;openModalFinal('Detail '+x.request.requestNo,'<div class="kpi-row"><div class="kpi">Status<strong>'+escFinal(x.request.status)+'</strong></div><div class="kpi">Tanggal<strong>'+escFinal(x.request.requestDate)+'</strong></div><div class="kpi">Staff<strong>'+escFinal(x.request.staffName)+'</strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Request</th><th>Approve</th><th>Stok Request</th><th>Catatan</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.sku)+'</td><td>'+escFinal(i.productName)+'</td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.qtyApproved)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td>'+escFinal(i.note||'-')+'</td></tr>';}).join('')+'</tbody></table></div>'+(x.request.rejectionReason?'<div class="info-strip"><strong>Alasan:</strong> '+escFinal(x.request.rejectionReason)+'</div>':'')+'','<button class="btn btn-secondary" data-close-modal>Tutup</button>');}
+  function openApproveFinal(x){var body='<form id="faReqForm"><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Request</th><th>Stok Saat Request</th><th>Qty Approved</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td><input class="field final-approve-qty" data-id="'+escFinal(i.requestItemId)+'" type="number" min="0" max="'+i.qtyRequested+'" step="1" value="'+i.qtyRequested+'"></td></tr>';}).join('')+'</tbody></table></div><div id="modalMessage" class="form-message hidden"></div></form>';openModalFinal('Approve '+x.request.requestNo,body,'<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="faReqForm">Approve</button>');byIdFinal('faReqForm').onsubmit=async function(e){e.preventDefault();var items=[];document.querySelectorAll('.final-approve-qty').forEach(function(i){items.push({requestItemId:i.dataset.id,qtyApproved:Number(i.value)});});var b=document.querySelector('#modalFooter .btn-primary'),m=byIdFinal('modalMessage');setBtnFinal(b,true,'Memproses...');try{await apiFinal('approveRequest',{requestId:x.request.requestId,items:items});closeModalFinal();showGlobalMessage('Pengajuan berhasil diproses.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Approve');}};}
+  function openRejectFinal(x){openModalFinal('Reject '+x.request.requestNo,'<form id="frRejectForm"><div class="form-group"><label>Alasan Reject</label><textarea id="frRejectReason" class="field" maxlength="500" required></textarea></div><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-danger" type="submit" form="frRejectForm">Reject</button>');byIdFinal('frRejectForm').onsubmit=async function(e){e.preventDefault();var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-danger');setBtnFinal(b,true,'Memproses...');try{await apiFinal('rejectRequest',{requestId:x.request.requestId,rejectionReason:valFinal('frRejectReason')});closeModalFinal();showGlobalMessage('Pengajuan ditolak.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Reject');}};}
+
+  async function renderFinalCreateRequest(content){await ensureMasterCaches();content.innerHTML=pageHeaderBlock('Buat Pengajuan','Pengajuan tidak mengurangi stok sampai Admin melakukan approval.','')+'<div class="panel"><div id="finalReqItems"></div><button class="btn btn-secondary" id="addFinalReqItem">+ Barang</button><form id="finalCreateReqForm" style="margin-top:16px"><div class="form-grid">'+fieldDateFinal('fcrDate','Tanggal')+'</div>'+fieldFinal('fcrNote','Catatan Umum','',500,false)+'<div id="fcrMsg" class="form-message hidden"></div><button class="btn btn-primary">Kirim Pengajuan</button></form></div>';addFinalReqRow();onFinal('addFinalReqItem','click',addFinalReqRow);onFinal('finalCreateReqForm','submit',async function(e){e.preventDefault();var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});var m=byIdFinal('fcrMsg');try{await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});showGlobalMessage('Pengajuan berhasil dibuat.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}});}
+  function addFinalReqRow(){var c=byIdFinal('finalReqItems'),r=document.createElement('div');r.className='form-grid fcr-row';r.innerHTML='<div class="form-group"><label>Barang</label><select class="field fcr-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fcr-qty','Qty',1)+'<div class="form-group"><label>Catatan</label><input class="field fcr-note" maxlength="300"></div><div class="form-group" style="display:flex;align-items:end"><button type="button" class="btn btn-danger fcr-remove">Hapus</button></div>';c.appendChild(r);r.querySelector('.fcr-remove').onclick=function(){r.remove();};}
+
+  async function renderFinalReorder(content){var r=await apiFinal('reorderRecommendations',{});state.reorderFinal=r.data.items||[];content.innerHTML=pageHeaderBlock('Rekomendasi Order','Current Stock ≤ Min Stock. Recommended Qty mempertimbangkan outstanding DRAFT/ORDERED/PARTIAL.','')+'<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Stok</th><th>Min</th><th>Max</th><th>Outstanding</th><th>Recommended</th><th>Harga</th><th>Aksi</th></tr></thead><tbody>'+ (state.reorderFinal.length?state.reorderFinal.map(function(x){return '<tr><td><strong>'+escFinal(x.sku)+'</strong></td><td>'+escFinal(x.productName)+'</td><td>'+fmtFinal(x.currentStock)+'</td><td>'+fmtFinal(x.minStock)+'</td><td>'+fmtFinal(x.maxStock)+'</td><td>'+fmtFinal(x.outstandingOrder)+'</td><td><strong>'+fmtFinal(x.recommendedQty)+'</strong></td><td>'+moneyFinal(x.price)+'</td><td><button class="btn btn-primary btn-sm rfPO" data-id="'+escFinal(x.productId)+'">Buat PO</button></td></tr>';}).join(''):emptyRowFinal(9,'Tidak ada rekomendasi.'))+'</tbody></table></div></div>';document.querySelectorAll('.rfPO').forEach(function(b){b.onclick=function(){var x=state.reorderFinal.find(function(z){return String(z.productId)===String(b.dataset.id);});openPOFinal(x);};});}
+
+  async function renderFinalPO(content){var r=await apiFinal('listPurchaseOrders',{});state.finalPO=r.data.items||[];content.innerHTML=pageHeaderBlock('Purchase Order','Kelola PO dan penerimaan partial.','<button class="btn btn-primary" id="newFinalPO">+ Buat PO</button>')+'<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>No</th><th>Tanggal</th><th>Supplier</th><th>Status</th><th>Total</th><th>Items</th><th>Aksi</th></tr></thead><tbody>'+ (state.finalPO.length?state.finalPO.map(function(x){var p=x.purchaseOrder;return '<tr><td><strong>'+escFinal(p.poNo)+'</strong></td><td>'+escFinal(p.orderDate)+'</td><td>'+escFinal(p.supplierName)+'</td><td>'+escFinal(p.status)+'</td><td>'+moneyFinal(p.totalAmount)+'</td><td>'+fmtFinal(x.items.length)+'</td><td><button class="btn btn-secondary btn-sm fpView" data-id="'+escFinal(p.poId)+'">Detail</button>'+(p.status!=='COMPLETED'&&p.status!=='CANCELLED'?'<button class="btn btn-primary btn-sm fpReceive" data-id="'+escFinal(p.poId)+'">Terima</button>':'')+'</td></tr>';}).join(''):emptyRowFinal(7,'Belum ada PO.'))+'</tbody></table></div></div>';onFinal('newFinalPO','click',function(){openPOFinal();});document.querySelectorAll('.fpView').forEach(function(b){b.onclick=function(){openPOViewFinal(state.finalPO.find(function(x){return String(x.purchaseOrder.poId)===String(b.dataset.id);}));};});document.querySelectorAll('.fpReceive').forEach(function(b){b.onclick=function(){openPOReceiptFinal(state.finalPO.find(function(x){return String(x.purchaseOrder.poId)===String(b.dataset.id);}));};});}
+
+  function openPOFinal(prefill){var sup=activeSupplierOptions(),prod=productOptions();openModalFinal('Buat Purchase Order','<form id="finalPOForm"><div class="form-grid"><div class="form-group"><label>Supplier</label><select id="fpoSupplier" class="field" required><option value="">Pilih</option>'+sup+'</select></div>'+fieldDateFinal('fpoDate','Tanggal Order')+'</div><div id="fpoItems"></div><button type="button" class="btn btn-secondary" id="addFPOItem">+ Item</button><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="finalPOForm">Buat PO</button>');if(prefill){byIdFinal('fpoSupplier').value=prefill.supplierId||'';addFPOItem(prefill);}else addFPOItem();onFinal('addFPOItem','click',function(){addFPOItem();});byIdFinal('finalPOForm').onsubmit=async function(e){e.preventDefault();var its=[];document.querySelectorAll('.fpo-row').forEach(function(r){its.push({productId:r.querySelector('.fpo-product').value,qtyOrdered:r.querySelector('.fpo-qty').value,price:r.querySelector('.fpo-price').value});});var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-primary');setBtnFinal(b,true,'Menyimpan...');try{await apiFinal('createPurchaseOrder',{supplierId:valFinal('fpoSupplier'),orderDate:valFinal('fpoDate'),items:its});closeModalFinal();showGlobalMessage('PO berhasil dibuat.','success');renderPage('listPurchaseOrders');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Buat PO');}};}
+  function addFPOItem(prefill){var c=byIdFinal('fpoItems'),r=document.createElement('div');r.className='form-grid fpo-row';r.innerHTML='<div class="form-group"><label>Barang</label><select class="field fpo-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fpo-qty','Qty',prefill?prefill.recommendedQty:1)+numberClassFinal('fpo-price','Harga',prefill?prefill.price:0)+'<div class="form-group" style="display:flex;align-items:end"><button type="button" class="btn btn-danger fpo-remove">Hapus</button></div>';c.appendChild(r);if(prefill)r.querySelector('.fpo-product').value=prefill.productId;r.querySelector('.fpo-remove').onclick=function(){r.remove();};}
+  function openPOViewFinal(x){if(!x)return;openModalFinal('Detail '+x.purchaseOrder.poNo,'<div class="kpi-row"><div class="kpi">Supplier<strong>'+escFinal(x.purchaseOrder.supplierName)+'</strong></div><div class="kpi">Status<strong>'+escFinal(x.purchaseOrder.status)+'</strong></div><div class="kpi">Total<strong>'+moneyFinal(x.purchaseOrder.totalAmount)+'</strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Order</th><th>Received</th><th>Remaining</th><th>Price</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyOrdered)+'</td><td>'+fmtFinal(i.qtyReceived)+'</td><td>'+fmtFinal(i.qtyRemaining)+'</td><td>'+moneyFinal(i.price)+'</td></tr>';}).join('')+'</tbody></table></div>','<button class="btn btn-secondary" data-close-modal>Tutup</button>');}
+
+  async function renderFinalPOReceipt(content){var r=await apiFinal('listPurchaseOrders',{}),rows=(r.data.items||[]).filter(function(x){return ['DRAFT','ORDERED','PARTIAL'].indexOf(x.purchaseOrder.status)>=0;});content.innerHTML=pageHeaderBlock('Penerimaan PO','Terima sebagian atau seluruh qty remaining.','')+'<div class="panel">'+(rows.length?rows.map(function(x){return '<div class="status-list-row" style="margin-bottom:8px"><span><strong>'+escFinal(x.purchaseOrder.poNo)+'</strong> · '+escFinal(x.purchaseOrder.supplierName)+' · '+escFinal(x.purchaseOrder.status)+'</span><button class="btn btn-primary btn-sm fpr" data-id="'+escFinal(x.purchaseOrder.poId)+'">Terima</button></div>';}).join(''):'<div class="empty-cell">Tidak ada PO menunggu penerimaan.</div>')+'</div>';document.querySelectorAll('.fpr').forEach(function(b){b.onclick=function(){openPOReceiptFinal(rows.find(function(x){return String(x.purchaseOrder.poId)===String(b.dataset.id);}));};});}
+  function openPOReceiptFinal(x){if(!x)return;var items=x.items.filter(function(i){return i.qtyRemaining>0;});openModalFinal('Penerimaan '+x.purchaseOrder.poNo,'<form id="fprForm">'+fieldDateFinal('fprDate','Tanggal')+fieldFinal('fprDoc','Nomor Dokumen','',100,false)+'<div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Remaining</th><th>Terima</th></tr></thead><tbody>'+items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyRemaining)+'</td><td><input class="field final-pr-qty" data-id="'+escFinal(i.poItemId)+'" type="number" min="0" max="'+i.qtyRemaining+'" value="0"></td></tr>';}).join('')+'</tbody></table></div><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="fprForm">Simpan Penerimaan</button>');byIdFinal('fprForm').onsubmit=async function(e){e.preventDefault();var its=[];document.querySelectorAll('.final-pr-qty').forEach(function(i){if(Number(i.value)>0)its.push({poItemId:i.dataset.id,qtyReceived:Number(i.value)});});var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-primary');setBtnFinal(b,true,'Memproses...');try{await apiFinal('receivePurchaseOrder',{poId:x.purchaseOrder.poId,receiptDate:valFinal('fprDate'),documentNo:valFinal('fprDoc'),items:its});closeModalFinal();showGlobalMessage('Penerimaan PO berhasil.','success');renderPage('receivePurchaseOrder');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Simpan Penerimaan');}};}
+
+  async function renderFinalReports(content){var r=await apiFinal('stockReport',{reportType:'stock'});state.finalReport=r.data;content.innerHTML=pageHeaderBlock('Laporan','Laporan kondisi stok saat ini dan transaksi.','<div class="report-actions"><button class="btn btn-secondary" id="rpPrint">Print</button><button class="btn btn-secondary" id="rpExport">Export Excel</button></div>')+'<div class="panel"><div class="report-actions no-print"><button class="btn btn-primary report-tab" data-type="stock">Stok</button><button class="btn btn-secondary report-tab" data-type="requests">Pengajuan</button><button class="btn btn-secondary report-tab" data-type="po">PO</button><button class="btn btn-secondary report-tab" data-type="receipts">Penerimaan</button><button class="btn btn-secondary report-tab" data-type="movements">Mutasi</button></div><div id="reportFinalArea" style="margin-top:14px">'+reportFinalHtml(r.data)+'</div></div>';document.querySelectorAll('.report-tab').forEach(function(b){b.onclick=async function(){try{var x=await apiFinal('stockReport',{reportType:b.dataset.type});state.finalReport=x.data;setHTMLFinal('reportFinalArea',reportFinalHtml(x.data));}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});onFinal('rpPrint','click',function(){printHtmlFinal('reportFinalArea','Laporan ATK Inventory');});onFinal('rpExport','click',function(){exportReportFinal(state.finalReport);});}
+  function reportFinalHtml(d){if(d.reportType==='stock')return '<div class="info-strip">Total inventory value: <strong>'+moneyFinal(d.totalInventoryValue)+'</strong>. Ini adalah kondisi stok saat ini, bukan snapshot historis.</div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Nama</th><th>Min</th><th>Max</th><th>Stok</th><th>Selisih</th><th>Harga</th><th>Subtotal</th><th>Supplier</th></tr></thead><tbody>'+(d.items||[]).map(function(x){return '<tr><td>'+escFinal(x.sku)+'</td><td>'+escFinal(x.name)+'</td><td>'+fmtFinal(x.minStock)+'</td><td>'+fmtFinal(x.maxStock)+'</td><td>'+fmtFinal(x.currentStock)+'</td><td>'+fmtFinal(x.difference)+'</td><td>'+moneyFinal(x.price)+'</td><td>'+moneyFinal(x.subtotal)+'</td><td>'+escFinal(x.supplier||'-')+'</td></tr>';}).join('')+'</tbody></table></div>';if(d.reportType==='requests')return '<div class="table-wrap"><table class="data-table"><thead><tr><th>No</th><th>Tanggal</th><th>Staff</th><th>Status</th><th>Items</th><th>Reject Reason</th></tr></thead><tbody>'+(d.items||[]).map(function(x){return '<tr><td>'+escFinal(x.request.requestNo)+'</td><td>'+escFinal(x.request.requestDate)+'</td><td>'+escFinal(x.request.staffName)+'</td><td>'+escFinal(x.request.status)+'</td><td>'+fmtFinal(x.items.length)+'</td><td>'+escFinal(x.request.rejectionReason||'-')+'</td></tr>';}).join('')+'</tbody></table></div>';if(d.reportType==='po')return '<div class="table-wrap"><table class="data-table"><thead><tr><th>PO</th><th>Tanggal</th><th>Supplier</th><th>Status</th><th>Total</th></tr></thead><tbody>'+(d.items||[]).map(function(x){return '<tr><td>'+escFinal(x.purchaseOrder.poNo)+'</td><td>'+escFinal(x.purchaseOrder.orderDate)+'</td><td>'+escFinal(x.purchaseOrder.supplierName)+'</td><td>'+escFinal(x.purchaseOrder.status)+'</td><td>'+moneyFinal(x.purchaseOrder.totalAmount)+'</td></tr>';}).join('')+'</tbody></table></div>';return '<div class="table-wrap"><table class="data-table"><thead><tr><th>Tipe</th><th>No</th><th>Tanggal</th><th>PO</th><th>Dokumen</th></tr></thead><tbody>'+(d.items||[]).map(function(x){return '<tr><td>'+escFinal(x.type)+'</td><td>'+escFinal(x.receiptNo)+'</td><td>'+escFinal(x.receiptDate)+'</td><td>'+escFinal(x.poId||'-')+'</td><td>'+escFinal(x.documentNo||'-')+'</td></tr>';}).join('')+'</tbody></table></div>';}
+
+  async function renderFinalImport(content){content.innerHTML=pageHeaderBlock('Import Excel','Header: SKU, Barcode, Nama Barang, Kategori, Satuan, Min, Max, Harga, Supplier, Lokasi.','<button class="btn btn-secondary" id="fiTemplate">Template</button>')+'<div class="panel"><input id="fiFile" class="field" type="file" accept=".xlsx,.xls,.csv"><div id="fiPreview" style="margin-top:14px"></div><div class="report-actions no-print" style="margin-top:14px"><button class="btn btn-primary" id="fiCommit" disabled>Commit Import</button></div><div id="fiMsg" class="form-message hidden"></div></div>';state.pendingImport=[];onFinal('fiTemplate','click',function(){exportExcelFinal('Template-Import-ATK',[{'SKU':'ATK-001','Barcode':'899000000001','Nama Barang':'Pulpen','Kategori':'Alat Tulis','Satuan':'pcs','Min':5,'Max':20,'Harga':3000,'Supplier':'SUP-01','Lokasi':'Gudang ATK'}]);});onFinal('fiFile','change',async function(){var file=this.files&&this.files[0];if(!file)return;try{var wb=XLSX.read(await file.arrayBuffer(),{type:'array'}),sheet=wb.Sheets[wb.SheetNames[0]],rows=XLSX.utils.sheet_to_json(sheet,{defval:''}),headerRows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''}),headers=(headerRows[0]||[]).map(function(x){return String(x).trim();}),required=['SKU','Barcode','Nama Barang','Kategori','Satuan','Min','Max','Harga','Supplier','Lokasi'];var missing=required.filter(function(h){return headers.indexOf(h)<0;});if(missing.length){state.pendingImport=[];byIdFinal('fiCommit').disabled=true;setHTMLFinal('fiPreview','<div class="form-message error">Header Excel tidak lengkap. Kurang: '+escFinal(missing.join(', '))+'</div>');messageFinal(byIdFinal('fiMsg'),'Header file tidak sesuai template.','error');return;}state.pendingImport=rows;setHTMLFinal('fiPreview',importPreviewFinal(rows));byIdFinal('fiCommit').disabled=!rows.length;messageFinal(byIdFinal('fiMsg'),'Header valid. Preview selesai. Periksa sebelum commit.','info');}catch(err){state.pendingImport=[];byIdFinal('fiCommit').disabled=true;messageFinal(byIdFinal('fiMsg'),'File tidak dapat dibaca: '+err.message,'error');}});onFinal('fiCommit','click',async function(){var b=this;setBtnFinal(b,true,'Mengimpor...');try{var r=await apiFinal('bulkUpsertProducts',{rows:state.pendingImport||[]});setHTMLFinal('fiPreview',importResultFinal(r.data));messageFinal(byIdFinal('fiMsg'),'Import selesai.','success');b.disabled=true;}catch(err){messageFinal(byIdFinal('fiMsg'),friendlyFinal(err),'error');}finally{if(!b.disabled)setBtnFinal(b,false,'Commit Import');}});}
+  function importPreviewFinal(rows){var keys=['SKU','Barcode','Nama Barang','Kategori','Satuan','Min','Max','Harga','Supplier','Lokasi'];return '<div class="info-strip">'+fmtFinal(rows.length)+' baris ditemukan; preview maksimal 20.</div><div class="table-wrap"><table class="data-table"><thead><tr>'+keys.map(function(k){return '<th>'+escFinal(k)+'</th>';}).join('')+'</tr></thead><tbody>'+rows.slice(0,20).map(function(r){return '<tr>'+keys.map(function(k){return '<td>'+escFinal(r[k]===undefined?(r[k.toLowerCase()]||''):r[k])+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>';}
+  function importResultFinal(d){return '<div class="kpi-row"><div class="kpi">Total<strong>'+fmtFinal(d.totalRows)+'</strong></div><div class="kpi">Created<strong>'+fmtFinal(d.created)+'</strong></div><div class="kpi">Updated<strong>'+fmtFinal(d.updated)+'</strong></div></div>'+(d.errors&&d.errors.length?'<div class="table-wrap"><table class="data-table"><thead><tr><th>Baris</th><th>Error</th></tr></thead><tbody>'+d.errors.map(function(x){return '<tr><td>'+fmtFinal(x.row)+'</td><td>'+escFinal(x.message)+'</td></tr>';}).join('')+'</tbody></table></div>':'<div class="form-message success">Semua baris berhasil diproses.</div>');}
+
+  async function renderFinalExport(content){content.innerHTML=headingFinal('Export Excel','Export dataset .xlsx dari browser.','')+'<div class="panel"><div class="report-actions">'+['products','movements','requests','po','receipts','stock'].map(function(x){return '<button class="btn btn-secondary final-export" data-type="'+x+'">'+x.toUpperCase()+'</button>';}).join('')+'</div></div>';document.querySelectorAll('.final-export').forEach(function(b){b.onclick=async function(){try{var type=b.dataset.type,rows=[];if(type==='products'){var p=await apiFinal('listProducts',{includeInactive:true});rows=p.data.items||[];}else{var r=await apiFinal('stockReport',{reportType:type==='products'?'stock':type});if(type==='requests')rows=(r.data.items||[]).map(function(x){return {requestNo:x.request.requestNo,requestDate:x.request.requestDate,staffName:x.request.staffName,status:x.request.status,items:x.items.length,rejectionReason:x.request.rejectionReason};});else if(type==='po')rows=(r.data.items||[]).map(function(x){return {poNo:x.purchaseOrder.poNo,orderDate:x.purchaseOrder.orderDate,supplier:x.purchaseOrder.supplierName,status:x.purchaseOrder.status,total:x.purchaseOrder.totalAmount,items:x.items.length};});else rows=r.data.items||[];}exportExcelFinal('ATK-Inventory-'+type,rows);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});}
+
+  async function renderFinalScanner(content){content.innerHTML=headingFinal('Barcode Scanner','Kamera browser melalui HTTPS; input manual tetap tersedia.','')+'<div class="panel scanner-box"><div id="finalScannerArea" class="scanner-stage"></div><div class="report-actions"><button class="btn btn-primary" id="startFinalScanner">Mulai Kamera</button><button class="btn btn-secondary" id="stopFinalScanner">Stop Kamera</button></div>'+fieldFinal('manualFinalBarcode','Barcode Manual','',100,false)+'<button class="btn btn-secondary" id="manualFinalSearch">Cari</button><div id="scannerFinalMsg" class="form-message hidden"></div><div id="scannerFinalResult" class="scan-result" style="margin-top:12px">Belum ada hasil.</div><div id="scannerFinalProduct"></div></div>';stopFinalScanner();onFinal('startFinalScanner','click',startFinalScanner);onFinal('stopFinalScanner','click',stopFinalScanner);onFinal('manualFinalSearch','click',function(){lookupFinalBarcode(valFinal('manualFinalBarcode'));});}
+  async function startFinalScanner(){if(typeof Html5Qrcode==='undefined'){showGlobalMessage('Library scanner tidak tersedia. Gunakan input manual.','warning');return;}if(state.finalScanner)return;try{var cams=await Html5Qrcode.getCameras();if(!cams.length)throw new Error('Kamera tidak ditemukan.');state.finalScanner=new Html5Qrcode('finalScannerArea',{verbose:false});await state.finalScanner.start({facingMode:{exact:'environment'}},{fps:10,qrbox:{width:260,height:120}},function(txt){setTextFinal('scannerFinalResult',txt);lookupFinalBarcode(txt);stopFinalScanner();},function(){});messageFinal(byIdFinal('scannerFinalMsg'),'Kamera aktif.','success');}catch(err){state.finalScanner=null;messageFinal(byIdFinal('scannerFinalMsg'),'Kamera gagal dibuka: '+err.message,'error');}}
+  async function stopFinalScanner(){if(!state.finalScanner)return;try{await state.finalScanner.stop();}catch(err){}try{state.finalScanner.clear();}catch(err2){}state.finalScanner=null;}
+  async function lookupFinalBarcode(code){try{var r=await apiFinal('searchProducts',{barcode:String(code||'').trim()});var p=(r.data.items||[])[0];setHTMLFinal('scannerFinalProduct',p?'<div class="panel" style="margin-top:12px"><strong>'+escFinal(p.name)+'</strong><p class="panel-copy">SKU: '+escFinal(p.sku)+' · Stok: '+fmtFinal(p.currentStock)+' · Lokasi: '+escFinal(p.location)+'</p></div>':'<div class="form-message warning">Barcode tidak ditemukan.</div>');}catch(err){showGlobalMessage(friendlyFinal(err),'error');}}
+
+  function headingFinal(t,d,a){return '<div class="page-heading flex-heading"><div><h3>'+escFinal(t)+'</h3><p>'+escFinal(d)+'</p></div>'+(a||'')+'</div>';}
+  function fieldFinal(id,label,val,max,req,type){return '<div class="form-group"><label>'+escFinal(label)+'</label><input id="'+id+'" class="field" type="'+(type||'text')+'" maxlength="'+max+'" '+(req?'required':'')+' value="'+escFinal(val||'')+'"></div>';}
+  function numberFieldFinal(id,label,val){return '<div class="form-group"><label>'+escFinal(label)+'</label><input id="'+id+'" class="field" type="number" min="0" step="1" value="'+escFinal(val)+'" required></div>';}
+  function numberClassFinal(cls,label,val){return '<div class="form-group"><label>'+escFinal(label)+'</label><input class="field '+cls+'" type="number" min="0" step="1" value="'+escFinal(val)+'" required></div>';}
+  function fieldDateFinal(id,label){return '<div class="form-group"><label>'+escFinal(label)+'</label><input id="'+id+'" class="field" type="date" value="'+todayFinal()+'" required></div>';}
+  function productOptions(){return '<option value="">Pilih barang</option>'+activeItemsFinal(state.products).map(function(x){return '<option value="'+escFinal(x.productId)+'">'+escFinal(x.sku)+' — '+escFinal(x.name)+' (Stok '+fmtFinal(x.currentStock)+')</option>';}).join('');}
+  function activeSupplierOptions(){return activeItemsFinal(state.suppliers).map(function(x){return '<option value="'+escFinal(x.supplierId)+'">'+escFinal(x.name)+' ('+escFinal(x.code)+')</option>';}).join('');}
+  function activeItemsFinal(a){return (a||[]).filter(function(x){return x.active;});}
+  async function ensureMasterCaches(){var r=await Promise.all([apiFinal('listProducts',{includeInactive:false}),apiFinal('listSuppliers',{}),apiFinal('listCategories',{})]);state.products=r[0].data.items||[];state.suppliers=r[1].data.items||[];state.categories=r[2].data.items||[];}
+  async function refreshProductsFinal(){var r=await apiFinal('listProducts',{includeInactive:true});state.products=r.data.items||[];}
+  function apiFinal(a,d){return apiRequest(a,d);}
+  function byIdFinal(id){return document.getElementById(id)}
+  function valFinal(id){var e=byIdFinal(id);return e?e.value:''}
+  function onFinal(id,event,fn){var e=byIdFinal(id);if(e)e.addEventListener(event,fn)}
+  function setHTMLFinal(id,h){var e=byIdFinal(id);if(e)e.innerHTML=h}
+  function setTextFinal(id,v){var e=byIdFinal(id);if(e)e.textContent=String(v==null?'':v)}
+  function escFinal(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
+  function fmtFinal(v){return new Intl.NumberFormat('id-ID',{maximumFractionDigits:2}).format(Number(v||0))}
+  function moneyFinal(v){return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(v||0))}
+  function todayFinal(){return new Date().toISOString().slice(0,10)}
+  function emptyRowFinal(c,t){return '<tr><td colspan="'+c+'" class="empty-cell">'+escFinal(t)+'</td></tr>'}
+  function statusFinal(s){return '<span class="badge '+(s==='MENUNGGU'?'warning':(s==='DISETUJUI_PENUH'||s==='COMPLETED'?'success':''))+'">'+escFinal(s)+'</span>'}
+  function setBtnFinal(b,on,label){if(!b)return;b.disabled=on;b.textContent=label}
+  function messageFinal(e,m,t){if(!e)return;e.className='form-message '+(t||'error');e.textContent=String(m||'');e.classList.remove('hidden')}
+  function friendlyFinal(e){return e&&e.message?String(e.message):'Terjadi kesalahan server.'}
+  function openModalFinal(title,body,footer){closeModalFinal();var o=document.createElement('div');o.id='modalOverlay';o.className='modal-overlay';o.innerHTML='<div class="modal-card"><div class="modal-header"><h3>'+escFinal(title)+'</h3><button class="icon-btn" data-close-modal>×</button></div><div class="modal-body">'+body+'</div><div class="modal-footer" id="modalFooter">'+footer+'</div></div>';document.body.appendChild(o);o.querySelectorAll('[data-close-modal]').forEach(function(b){b.onclick=closeModalFinal;});o.addEventListener('click',function(e){if(e.target===o)closeModalFinal();});}
+  function closeModalFinal(){var o=byIdFinal('modalOverlay');if(o)o.remove()}
+  function printHtmlFinal(id,title){var e=byIdFinal(id);if(!e)return;var w=window.open('','_blank','noopener,noreferrer,width=1100,height=800');if(!w){showGlobalMessage('Popup diblokir browser.','warning');return;}w.document.write('<!doctype html><html><head><title>'+escFinal(title)+'</title><style>body{font-family:Arial,sans-serif;padding:20px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #aaa;padding:6px;text-align:left}th{background:#eee}.no-print{display:none}</style></head><body><h2>'+escFinal(title)+'</h2>'+e.innerHTML+'</body></html>');w.document.close();w.focus();setTimeout(function(){w.print();w.close();},250);}
+  function exportExcelFinal(name,rows){if(typeof XLSX==='undefined'){showGlobalMessage('Library Excel tidak tersedia.','error');return;}var wb=XLSX.utils.book_new(),ws=XLSX.utils.json_to_sheet(rows||[]);XLSX.utils.book_append_sheet(wb,ws,'Data');XLSX.writeFile(wb,name+'.xlsx');}
+  function exportReportFinal(d){if(!d)return;var rows=d.reportType==='requests'?(d.items||[]).map(function(x){return {requestNo:x.request.requestNo,date:x.request.requestDate,staff:x.request.staffName,status:x.request.status,items:x.items.length,rejectionReason:x.request.rejectionReason};}):d.reportType==='po'?(d.items||[]).map(function(x){return {poNo:x.purchaseOrder.poNo,date:x.purchaseOrder.orderDate,supplier:x.purchaseOrder.supplierName,status:x.purchaseOrder.status,total:x.purchaseOrder.totalAmount};}):(d.items||[]);exportExcelFinal('Laporan-'+d.reportType,rows);}
+
+  function renderPlaceholder(content, action, title) {
+    content.innerHTML =
+      '<div class="page-heading"><h3>' + escapeHtml(title) + '</h3>' +
+      '<p>' + escapeHtml(getModuleDescription(action)) + '</p></div>' +
+      '<div class="placeholder-card"><h3>Modul berikutnya</h3>' +
+      '<p>Menu dan permission sudah tersedia. Implementasi bisnis modul ini akan dibuat pada tahap berikutnya tanpa mengubah fondasi Master Data yang sudah selesai.</p></div>';
+  }
+
+  function getModuleDescription(action) {
+    var descriptions = {
+      receiveStock: 'Catat transaksi barang masuk dan tambah stok.',
+      barcodeScanner: 'Scan barcode menggunakan kamera browser atau input manual.',
+      adjustStock: 'Lakukan adjustment dan opname dengan kontrol transaksi.',
+      listMovements: 'Lihat histori mutasi stok berdasarkan filter.',
+      reorderRecommendations: 'Rekomendasi order berdasarkan min/max dan outstanding PO.',
+      listPurchaseOrders: 'Kelola Purchase Order.',
+      receivePurchaseOrder: 'Penerimaan PO termasuk partial receipt.',
+      listRequests: 'Approval pengajuan Staff.',
+      stockReport: 'Laporan stok dan transaksi.',
+      bulkUpsertProducts: 'Import Master Barang dari Excel.',
+      exportExcel: 'Export data ke Excel.',
+      createRequest: 'Buat pengajuan barang.',
+      myRequests: 'Lihat pengajuan sendiri.',
+      printRequests: 'Cetak pengajuan.'
+    };
+    return descriptions[action] || 'Modul ATK Inventory.';
+  }
+
+  function getPageTitle(action) {
+    var role = String(state.user && state.user.role || '').toUpperCase();
+    var items = NAV_ITEMS[role] || [];
+
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].action === action) return items[i].label;
+    }
+
+    return 'Dashboard';
+  }
+
+  function pageHeaderBlock(title, description, actionHtml) {
+    return '<div class="page-heading flex-heading">' +
+      '<div><h3>' + escapeHtml(title) + '</h3><p>' + escapeHtml(description) + '</p></div>' +
+      (actionHtml || '') +
+      '</div>';
+  }
+
+  function tableToolbar(id, placeholder) {
+    return '<div class="table-toolbar">' +
+      '<input id="' + escapeAttribute(id) + '" class="field" placeholder="' +
+      escapeAttribute(placeholder) + '">' +
+      '</div>';
+  }
+
+  function fieldHtml(id, label, value, maxlength, required, type) {
+    return '<div class="form-group"><label for="' + id + '">' +
+      escapeHtml(label) + '</label><input id="' + id + '" class="field" type="' +
+      (type || 'text') + '" maxlength="' + maxlength + '"' +
+      (required ? ' required' : '') + ' value="' + escapeAttribute(value || '') + '"></div>';
+  }
+
+  function fieldHtmlNumber(id, label, value, required, type) {
+    return '<div class="form-group"><label for="' + id + '">' +
+      escapeHtml(label) + '</label><input id="' + id + '" class="field" type="' +
+      (type || 'number') + '" min="0" step="0.01"' +
+      (required ? ' required' : '') + ' value="' + escapeAttribute(value == null ? 0 : value) + '"></div>';
+  }
+
+  function openModal(config) {
+    closeModal();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'modalOverlay';
+    overlay.className = 'modal-overlay';
+
+    overlay.innerHTML =
+      '<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">' +
+      '<div class="modal-header"><h3 id="modalTitle">' + escapeHtml(config.title) + '</h3>' +
+      '<button type="button" class="icon-btn" data-close-modal aria-label="Tutup">×</button></div>' +
+      '<div class="modal-body">' + config.body + '</div>' +
+      '<div class="modal-footer" id="modalFooter">' + config.footer + '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    var closeButtons = overlay.querySelectorAll('[data-close-modal]');
+    for (var i = 0; i < closeButtons.length; i++) {
+      closeButtons[i].addEventListener('click', closeModal);
+    }
+
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) closeModal();
+    });
+
+    var firstInput = overlay.querySelector('input, select, textarea');
+    if (firstInput) firstInput.focus();
+  }
+
+  function closeModal() {
+    var existing = document.getElementById('modalOverlay');
+    if (existing) existing.remove();
+  }
+
+  function statCard(label, value) {
+    return '<div class="stat-card"><div class="stat-label">' +
+      escapeHtml(label) + '</div><div class="stat-value">' + escapeHtml(value) + '</div></div>';
+  }
+
+  function activeItems(items) {
+    return items.filter(function (item) { return item.active; });
+  }
+
+  function findCacheName(items, idField, idValue, nameField) {
+    var found = items.find(function (row) {
+      return String(row[idField]) === String(idValue);
+    });
+
+    return found ? String(found[nameField] || '') : '';
+  }
+
+  function emptyRow(colspan, text) {
+    return '<tr><td colspan="' + colspan + '" class="empty-cell">' +
+      escapeHtml(text) + '</td></tr>';
+  }
+
+  function statusBadge(active) {
+    return active
+      ? '<span class="badge success">Aktif</span>'
+      : '<span class="badge">Nonaktif</span>';
+  }
+
+  function formatMoney(value) {
+    try {
+      return new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        maximumFractionDigits: 0
+      }).format(Number(value || 0));
+    } catch (err) {
+      return 'Rp ' + number(value);
+    }
+  }
+
+  function formatDate(value) {
+    if (!value) return '-';
+
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+
+    return date.toLocaleString('id-ID', {
+      dateStyle: 'short',
+      timeStyle: 'short'
+    });
+  }
+
+  function number(value) {
+    var n = Number(value || 0);
+    return new Intl.NumberFormat('id-ID', {
+      maximumFractionDigits: 2
+    }).format(n);
+  }
+
+  function setConnectionStatus(mode) {
+    var element = document.getElementById('connectionStatus');
+    if (!element) return;
+
+    var label = 'Online';
+    if (mode === 'checking') label = 'Memeriksa';
+    else if (mode === 'offline') label = 'Offline';
+    else if (mode === 'error') label = 'Error';
+
+    element.innerHTML =
+      '<span class="status-dot"></span><span>' + escapeHtml(label) + '</span>';
+  }
+
+  function showGlobalMessage(message, type) {
+    var element = document.getElementById('globalMessage');
+    if (!element) return;
+
+    showMessageElement(element, message, type);
+    window.setTimeout(function () {
+      hideElement(element);
+    }, 5000);
+  }
+
+  function showMessageElement(element, message, type) {
+    if (!element) return;
+    element.className = 'form-message ' + (type || 'error');
+    element.textContent = String(message || '');
+    element.classList.remove('hidden');
+  }
+
+  function hideElement(element) {
+    if (element) element.classList.add('hidden');
+  }
+
+  function showElement(element) {
+    if (element) element.classList.remove('hidden');
+  }
+
+  function setButtonLoading(button, loading) {
+    if (!button) return;
+
+    button.disabled = loading;
+
+    var label = button.querySelector('.btn-label');
+    var spinner = button.querySelector('.spinner');
+
+    if (label) label.textContent = loading ? 'Memproses...' : 'Login';
+
+    if (spinner) {
+      if (loading) spinner.classList.remove('hidden');
+      else spinner.classList.add('hidden');
+    }
+  }
+
+  function setButtonLoadingGeneric(button, loading, labelText) {
+    if (!button) return;
+    button.disabled = loading;
+
+    if (loading) {
+      button.setAttribute('data-original-label', button.textContent);
+      button.textContent = labelText || 'Memproses...';
+    } else {
+      button.textContent = labelText || button.getAttribute('data-original-label') || 'Simpan';
+    }
+  }
+
+  function persistSession() {
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEYS.SESSION,
+        JSON.stringify({
+          sessionToken: state.sessionToken,
+          expiresAt: state.expiresAt
+        })
+      );
+    } catch (err) {
+      showGlobalMessage('Browser tidak mengizinkan penyimpanan session lokal.', 'warning');
+    }
+  }
+
+  function clearSession() {
+    state.sessionToken = '';
+    state.expiresAt = '';
+    state.user = null;
+    state.caches = {
+      categories: [],
+      suppliers: [],
+      products: [],
+      users: []
+    };
+
+    try {
+      window.localStorage.removeItem(STORAGE_KEYS.SESSION);
+    } catch (err) {
+      /* Ignore. */
+    }
+  }
+
+  function setText(id, value) {
+    var element = document.getElementById(id);
+    if (element) element.textContent = String(value == null ? '' : value);
+  }
+
+  function getInitials(name) {
+    var text = String(name || '').trim();
+    if (!text) return 'U';
+
+    var parts = text.split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+
+    return (parts[0].charAt(0) +
+      parts[parts.length - 1].charAt(0)).toUpperCase();
+  }
+
+  function extractErrorMessage(result) {
+    if (!result || !result.error) return '';
+    return String(result.error.message || '');
+  }
+
+  function getFriendlyError(error) {
+    if (!error) return 'Terjadi kesalahan yang tidak diketahui.';
+    if (typeof error === 'string') return error;
+
+    var code = String(error.code || '');
+
+    if (code === 'NETWORK_ERROR') return 'Tidak dapat terhubung ke server.';
+    if (code === 'INVALID_JSON') return 'Server mengembalikan respons yang tidak valid.';
+    if (code === 'RATE_LIMITED') return 'Terlalu banyak percobaan login. Coba lagi beberapa menit.';
+    if (error.message) return String(error.message);
+
+    return 'Terjadi kesalahan pada server.';
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function escapeAttribute(value) {
+    return escapeHtml(value);
+  }
+
+  function openSidebar() {
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('sidebarOverlay');
+    if (sidebar) sidebar.classList.add('open');
+    if (overlay) overlay.classList.remove('hidden');
+  }
+
+  function closeSidebar() {
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('sidebarOverlay');
+    if (sidebar) sidebar.classList.remove('open');
+    if (overlay) overlay.classList.add('hidden');
+  }
+})();

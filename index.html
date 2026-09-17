@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0f172a">
+  <title>ATK Inventory</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <div id="loadingScreen" class="loading-screen">
+      <div class="loading-card">
+        <div class="brand-mark">ATK</div>
+        <div>
+          <strong>ATK Inventory</strong>
+          <span>Memuat aplikasi...</span>
+        </div>
+      </div>
+    </div>
+
+    <section id="loginView" class="auth-view hidden">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <div class="brand-mark large">ATK</div>
+          <div>
+            <h1>ATK Inventory</h1>
+            <p>Sistem Persediaan & Pengajuan Barang</p>
+          </div>
+        </div>
+
+        <form id="loginForm" novalidate>
+          <div class="form-group">
+            <label for="loginUsername">Username</label>
+            <input id="loginUsername" name="username" type="text"
+              autocomplete="username" maxlength="80" required>
+          </div>
+
+          <div class="form-group">
+            <label for="loginPassword">Password</label>
+            <input id="loginPassword" name="password" type="password"
+              autocomplete="current-password" maxlength="120" required>
+          </div>
+
+          <div id="loginError" class="form-message error hidden" role="alert"></div>
+
+          <button id="loginButton" class="btn btn-primary btn-full" type="submit">
+            <span class="btn-label">Login</span>
+            <span class="spinner small hidden" aria-hidden="true"></span>
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <section id="mainView" class="hidden">
+      <div id="sidebarOverlay" class="sidebar-overlay hidden"></div>
+
+      <aside id="sidebar" class="sidebar" aria-label="Navigasi utama">
+        <div class="sidebar-header">
+          <div class="brand-lockup">
+            <div class="brand-mark">ATK</div>
+            <div>
+              <strong>ATK Inventory</strong>
+              <span id="sidebarRole">-</span>
+            </div>
+          </div>
+          <button id="closeSidebarButton" class="icon-btn mobile-only" type="button"
+            aria-label="Tutup menu">×</button>
+        </div>
+
+        <nav id="mainNav" class="nav-list"></nav>
+
+        <div class="sidebar-footer">
+          <div class="sidebar-user">
+            <div id="sidebarUserInitial" class="avatar">U</div>
+            <div class="sidebar-user-copy">
+              <strong id="sidebarUserName">User</strong>
+              <span id="sidebarUserDepartment">-</span>
+            </div>
+          </div>
+          <button id="logoutButton" class="btn btn-ghost btn-full" type="button">
+            Keluar
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button id="menuButton" class="icon-btn mobile-only" type="button"
+              aria-label="Buka menu">☰</button>
+            <div>
+              <div class="eyebrow">ATK Inventory</div>
+              <h2 id="pageTitle">Dashboard</h2>
+            </div>
+          </div>
+
+          <div class="topbar-right">
+            <div id="connectionStatus" class="status-pill">
+              <span class="status-dot"></span>
+              <span>Online</span>
+            </div>
+            <div class="top-user">
+              <div id="topUserInitial" class="avatar small">U</div>
+              <div class="top-user-copy">
+                <strong id="topUserName">User</strong>
+                <span id="topUserRole">-</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section class="content-area">
+          <div id="globalMessage" class="form-message hidden" role="status"></div>
+          <div id="pageContent"></div>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

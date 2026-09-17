@@ -1,0 +1,9 @@
+{
+  "name": "atk-inventory",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ATK Inventory frontend and Vercel proxy",
+  "engines": {
+    "node": "20.x"
+  }
+}
