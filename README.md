@@ -270,3 +270,6 @@ Pembaruan production-ready:
 - Purchase Order dapat ditandai `ORDERED` dan dibatalkan dengan kontrol status yang tervalidasi backend.
 
 Versi ini mempertahankan backend dan API yang sudah berfungsi, dengan penyempurnaan frontend: menu modul pada sidebar tampil sebagai kartu berwarna, memiliki efek glow saat hover/focus, dashboard memakai kartu statistik berwarna, dan background aplikasi menggunakan pola/grid halus berbasis CSS. Layout tetap responsif untuk desktop dan HP.
+
+### Camera / Barcode troubleshooting
+The latest frontend uses a more compatible camera startup flow for mobile browsers. It starts the scanner directly with the rear-camera preference, falls back to a second constraint form when needed, checks HTTPS/media-device availability, and converts browser camera errors into clear user-facing messages. If camera permission was previously denied, allow camera access for the Vercel site and press **Mulai Kamera** again.
