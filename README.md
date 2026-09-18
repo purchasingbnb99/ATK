@@ -250,3 +250,7 @@ Static checks yang dilakukan sebelum package final:
 - barcode library references
 
 End-to-end production test tetap memerlukan URL Apps Script `/exec`, API key asli, dan environment variables Vercel yang nyata; nilai secret tidak disertakan di package.
+
+## Pembaruan Mobile & Barcode
+
+Dashboard berwarna, scan barcode pada form Master Barang, serta alur simpan/edit dari modul Barcode Scanner sudah ditambahkan.

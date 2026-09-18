@@ -1,6 +1,6 @@
 /**
  * ATK Inventory - Frontend
- * Stage 4: Master Data
+ * ATK Inventory - FINAL / Mobile Ready
  *
  * Browser frontend. Never place Apps Script URL/API key here.
  */
@@ -20,6 +20,8 @@
     user: null,
     activePage: 'dashboard',
     initialized: false,
+    finalScanner: null,
+    productScanner: null,
     caches: {
       categories: [],
       suppliers: [],
@@ -880,7 +882,10 @@
     }
   }
 
-  function openProductModal(item) {
+  function openProductModal(item, options) {
+    options = options || {};
+    var forceCreate = !!options.forceCreate;
+    var editMode = !!item && !forceCreate;
     var categories = activeItems(state.caches.categories);
     var suppliers = activeItems(state.caches.suppliers);
 
@@ -894,45 +899,72 @@
 
     var categoryOptions = categories.map(function (row) {
       return '<option value="' + escapeAttribute(row.categoryId) + '"' +
-        (item && String(item.categoryId) === String(row.categoryId) ? ' selected' : '') +
+        (item && item.categoryId && String(item.categoryId) === String(row.categoryId) ? ' selected' : '') +
         '>' + escapeHtml(row.categoryName) + '</option>';
     }).join('');
 
     var supplierOptions = suppliers.map(function (row) {
       return '<option value="' + escapeAttribute(row.supplierId) + '"' +
-        (item && String(item.supplierId) === String(row.supplierId) ? ' selected' : '') +
+        (item && item.supplierId && String(item.supplierId) === String(row.supplierId) ? ' selected' : '') +
         '>' + escapeHtml(row.name) + ' (' + escapeHtml(row.code) + ')</option>';
     }).join('');
 
+    var barcodeValue = item && item.barcode ? item.barcode : '';
+    var barcodeScannerHtml =
+      '<div class="barcode-input-wrap">' +
+      '<div class="barcode-input-line">' +
+      '<input id="productBarcodeInput" class="field" type="text" maxlength="100" required value="' + escapeAttribute(barcodeValue) + '">' +
+      '<button type="button" class="btn btn-secondary barcode-scan-btn" id="productBarcodeScanButton">▦ Scan</button>' +
+      '</div>' +
+      '<div id="productBarcodeScannerPanel" class="inline-scanner hidden">' +
+      '<div id="productBarcodeScannerArea" class="scanner-stage compact"></div>' +
+      '<div class="report-actions">' +
+      '<button type="button" class="btn btn-primary" id="startProductScanner">Mulai Kamera</button>' +
+      '<button type="button" class="btn btn-secondary" id="stopProductScanner">Stop Kamera</button>' +
+      '</div>' +
+      '<div id="productScannerMessage" class="form-message hidden" role="alert"></div>' +
+      '</div>' +
+      '</div>';
+
     openModal({
-      title: item ? 'Edit Barang' : 'Tambah Barang',
+      title: editMode ? 'Edit Barang' : (options.fromScanner ? 'Simpan Barang dari Barcode' : 'Tambah Barang'),
       body:
         '<form id="productForm">' +
         '<div class="form-grid">' +
-        fieldHtml('productSkuInput', 'SKU', item ? item.sku : '', 60, true) +
-        fieldHtml('productBarcodeInput', 'Barcode', item ? item.barcode : '', 100, true) +
-        fieldHtml('productNameInput', 'Nama Barang', item ? item.name : '', 200, true) +
+        fieldHtml('productSkuInput', 'SKU', editMode ? item.sku : '', 60, true) +
+        '<div class="form-group"><label for="productBarcodeInput">Barcode</label>' +
+        barcodeScannerHtml + '</div>' +
+        fieldHtml('productNameInput', 'Nama Barang', editMode ? item.name : '', 200, true) +
         '<div class="form-group"><label for="productCategoryInput">Kategori</label>' +
         '<select id="productCategoryInput" class="field" required>' +
         '<option value="">Pilih kategori</option>' + categoryOptions + '</select></div>' +
-        fieldHtml('productUnitInput', 'Satuan', item ? item.unit : '', 40, true) +
-        fieldHtmlNumber('productMinInput', 'Min Stock', item ? item.minStock : 0, true) +
-        fieldHtmlNumber('productMaxInput', 'Max Stock', item ? item.maxStock : 1, true) +
-        fieldHtmlNumber('productPriceInput', 'Harga', item ? item.price : 0, true, 'number') +
+        fieldHtml('productUnitInput', 'Satuan', editMode ? item.unit : '', 40, true) +
+        fieldHtmlNumber('productMinInput', 'Min Stock', editMode ? item.minStock : 0, true) +
+        fieldHtmlNumber('productMaxInput', 'Max Stock', editMode ? item.maxStock : 1, true) +
+        fieldHtmlNumber('productPriceInput', 'Harga', editMode ? item.price : 0, true, 'number') +
         '<div class="form-group"><label for="productSupplierInput">Supplier</label>' +
         '<select id="productSupplierInput" class="field" required>' +
         '<option value="">Pilih supplier</option>' + supplierOptions + '</select></div>' +
-        fieldHtml('productLocationInput', 'Lokasi', item ? item.location : '', 150, true) +
+        fieldHtml('productLocationInput', 'Lokasi', editMode ? item.location : '', 150, true) +
         '</div>' +
         '<div class="info-strip">Current Stock saat ini: <strong>' +
-        number(item ? item.currentStock : 0) +
+        number(editMode ? item.currentStock : 0) +
         '</strong>. Field ini hanya berubah melalui transaksi stok.</div>' +
+        (options.fromScanner ? '<div class="info-strip scanner-prefill-note">Barcode dari hasil scanner sudah diisi otomatis. Lengkapi data barang lalu tekan Simpan.</div>' : '') +
         '<div id="modalMessage" class="form-message hidden" role="alert"></div>' +
         '</form>',
       footer:
         '<button type="button" class="btn btn-secondary" data-close-modal>Batal</button>' +
         '<button type="submit" form="productForm" class="btn btn-primary">Simpan</button>'
     });
+
+    document.getElementById('productBarcodeScanButton').addEventListener('click', function () {
+      var panel = document.getElementById('productBarcodeScannerPanel');
+      if (panel) panel.classList.remove('hidden');
+      startProductScanner();
+    });
+    document.getElementById('startProductScanner').addEventListener('click', startProductScanner);
+    document.getElementById('stopProductScanner').addEventListener('click', stopProductScanner);
 
     document.getElementById('productForm').addEventListener('submit', async function (event) {
       event.preventDefault();
@@ -941,7 +973,7 @@
       var button = document.querySelector('#modalFooter button.btn-primary');
 
       var data = {
-        productId: item ? item.productId : '',
+        productId: editMode ? item.productId : '',
         sku: document.getElementById('productSkuInput').value.trim(),
         barcode: document.getElementById('productBarcodeInput').value.trim(),
         name: document.getElementById('productNameInput').value.trim(),
@@ -957,11 +989,12 @@
       setButtonLoadingGeneric(button, true, 'Menyimpan...');
 
       try {
-        await apiRequest(item ? 'updateProduct' : 'createProduct', data);
+        await apiRequest(editMode ? 'updateProduct' : 'createProduct', data);
+        await stopProductScanner();
         closeModal();
         renderPage('listProducts');
         showGlobalMessage(
-          item ? 'Barang berhasil diperbarui.' : 'Barang berhasil ditambahkan.',
+          editMode ? 'Barang berhasil diperbarui.' : 'Barang berhasil ditambahkan.',
           'success'
         );
       } catch (error) {
@@ -970,6 +1003,54 @@
         setButtonLoadingGeneric(button, false, 'Simpan');
       }
     });
+  }
+
+  async function startProductScanner() {
+    if (typeof Html5Qrcode === 'undefined') {
+      showGlobalMessage('Library scanner tidak tersedia. Gunakan input barcode manual.', 'warning');
+      return;
+    }
+    if (state.productScanner) return;
+
+    var area = document.getElementById('productBarcodeScannerArea');
+    var message = document.getElementById('productScannerMessage');
+    if (!area || !message) return;
+
+    try {
+      var cams = await Html5Qrcode.getCameras();
+      if (!cams.length) throw new Error('Kamera tidak ditemukan.');
+      state.productScanner = new Html5Qrcode('productBarcodeScannerArea', { verbose: false });
+      await state.productScanner.start(
+        { facingMode: { exact: 'environment' } },
+        { fps: 10, qrbox: { width: 280, height: 120 } },
+        async function (decodedText) {
+          var code = String(decodedText || '').trim();
+          if (!code) return;
+          var input = document.getElementById('productBarcodeInput');
+          if (input) input.value = code;
+          message.className = 'form-message success';
+          message.textContent = 'Barcode terbaca: ' + code;
+          message.classList.remove('hidden');
+          await stopProductScanner();
+        },
+        function () {}
+      );
+      message.className = 'form-message success';
+      message.textContent = 'Kamera aktif. Arahkan kamera ke barcode barang.';
+      message.classList.remove('hidden');
+    } catch (err) {
+      state.productScanner = null;
+      message.className = 'form-message error';
+      message.textContent = 'Kamera gagal dibuka: ' + err.message;
+      message.classList.remove('hidden');
+    }
+  }
+
+  async function stopProductScanner() {
+    if (!state.productScanner) return;
+    try { await state.productScanner.stop(); } catch (err) {}
+    try { state.productScanner.clear(); } catch (err2) {}
+    state.productScanner = null;
   }
 
   async function renderUsers(content) {
@@ -1282,10 +1363,10 @@
 
   async function renderFinalExport(content){content.innerHTML=headingFinal('Export Excel','Export dataset .xlsx dari browser.','')+'<div class="panel"><div class="report-actions">'+['products','movements','requests','po','receipts','stock'].map(function(x){return '<button class="btn btn-secondary final-export" data-type="'+x+'">'+x.toUpperCase()+'</button>';}).join('')+'</div></div>';document.querySelectorAll('.final-export').forEach(function(b){b.onclick=async function(){try{var type=b.dataset.type,rows=[];if(type==='products'){var p=await apiFinal('listProducts',{includeInactive:true});rows=p.data.items||[];}else{var r=await apiFinal('stockReport',{reportType:type==='products'?'stock':type});if(type==='requests')rows=(r.data.items||[]).map(function(x){return {requestNo:x.request.requestNo,requestDate:x.request.requestDate,staffName:x.request.staffName,status:x.request.status,items:x.items.length,rejectionReason:x.request.rejectionReason};});else if(type==='po')rows=(r.data.items||[]).map(function(x){return {poNo:x.purchaseOrder.poNo,orderDate:x.purchaseOrder.orderDate,supplier:x.purchaseOrder.supplierName,status:x.purchaseOrder.status,total:x.purchaseOrder.totalAmount,items:x.items.length};});else rows=r.data.items||[];}exportExcelFinal('ATK-Inventory-'+type,rows);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});}
 
-  async function renderFinalScanner(content){content.innerHTML=headingFinal('Barcode Scanner','Kamera browser melalui HTTPS; input manual tetap tersedia.','')+'<div class="panel scanner-box"><div id="finalScannerArea" class="scanner-stage"></div><div class="report-actions"><button class="btn btn-primary" id="startFinalScanner">Mulai Kamera</button><button class="btn btn-secondary" id="stopFinalScanner">Stop Kamera</button></div>'+fieldFinal('manualFinalBarcode','Barcode Manual','',100,false)+'<button class="btn btn-secondary" id="manualFinalSearch">Cari</button><div id="scannerFinalMsg" class="form-message hidden"></div><div id="scannerFinalResult" class="scan-result" style="margin-top:12px">Belum ada hasil.</div><div id="scannerFinalProduct"></div></div>';stopFinalScanner();onFinal('startFinalScanner','click',startFinalScanner);onFinal('stopFinalScanner','click',stopFinalScanner);onFinal('manualFinalSearch','click',function(){lookupFinalBarcode(valFinal('manualFinalBarcode'));});}
+  async function renderFinalScanner(content){content.innerHTML=headingFinal('Barcode Scanner','Scan barcode bawaan barang, cari produk, lalu simpan barcode baru atau edit data produk yang sudah terdaftar.','')+'<div class="panel scanner-box"><div id="finalScannerArea" class="scanner-stage"></div><div class="report-actions"><button class="btn btn-primary" id="startFinalScanner">Mulai Kamera</button><button class="btn btn-secondary" id="stopFinalScanner">Stop Kamera</button></div>'+fieldFinal('manualFinalBarcode','Barcode Manual','',100,false)+'<button class="btn btn-secondary" id="manualFinalSearch">Cari</button><div id="scannerFinalMsg" class="form-message hidden"></div><div id="scannerFinalResult" class="scan-result" style="margin-top:12px">Belum ada hasil.</div><div id="scannerFinalProduct"></div></div>';await stopFinalScanner();await stopProductScanner();onFinal('startFinalScanner','click',startFinalScanner);onFinal('stopFinalScanner','click',stopFinalScanner);onFinal('manualFinalSearch','click',function(){lookupFinalBarcode(valFinal('manualFinalBarcode'));});}
   async function startFinalScanner(){if(typeof Html5Qrcode==='undefined'){showGlobalMessage('Library scanner tidak tersedia. Gunakan input manual.','warning');return;}if(state.finalScanner)return;try{var cams=await Html5Qrcode.getCameras();if(!cams.length)throw new Error('Kamera tidak ditemukan.');state.finalScanner=new Html5Qrcode('finalScannerArea',{verbose:false});await state.finalScanner.start({facingMode:{exact:'environment'}},{fps:10,qrbox:{width:260,height:120}},function(txt){setTextFinal('scannerFinalResult',txt);lookupFinalBarcode(txt);stopFinalScanner();},function(){});messageFinal(byIdFinal('scannerFinalMsg'),'Kamera aktif.','success');}catch(err){state.finalScanner=null;messageFinal(byIdFinal('scannerFinalMsg'),'Kamera gagal dibuka: '+err.message,'error');}}
   async function stopFinalScanner(){if(!state.finalScanner)return;try{await state.finalScanner.stop();}catch(err){}try{state.finalScanner.clear();}catch(err2){}state.finalScanner=null;}
-  async function lookupFinalBarcode(code){try{var r=await apiFinal('searchProducts',{barcode:String(code||'').trim()});var p=(r.data.items||[])[0];setHTMLFinal('scannerFinalProduct',p?'<div class="panel" style="margin-top:12px"><strong>'+escFinal(p.name)+'</strong><p class="panel-copy">SKU: '+escFinal(p.sku)+' · Stok: '+fmtFinal(p.currentStock)+' · Lokasi: '+escFinal(p.location)+'</p></div>':'<div class="form-message warning">Barcode tidak ditemukan.</div>');}catch(err){showGlobalMessage(friendlyFinal(err),'error');}}
+  async function lookupFinalBarcode(code){var clean=String(code||'').trim();if(!clean){messageFinal(byIdFinal('scannerFinalMsg'),'Barcode belum diisi.','warning');return;}setTextFinal('scannerFinalResult',clean);try{var r=await apiFinal('searchProducts',{barcode:clean});var p=(r.data.items||[])[0];if(p){var isAdmin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';var editAction=isAdmin?'<button type="button" class="btn btn-primary" id="scannerEditProduct">Edit Barang</button>':'';setHTMLFinal('scannerFinalProduct','<div class="panel scanner-product-card" style="margin-top:12px"><div class="panel-header"><h4 class="panel-title">Barang ditemukan</h4><span class="badge success">Terdaftar</span></div><strong>'+escFinal(p.name)+'</strong><p class="panel-copy">SKU: '+escFinal(p.sku)+' · Barcode: '+escFinal(p.barcode)+' · Stok: '+fmtFinal(p.currentStock)+' · Lokasi: '+escFinal(p.location)+'</p><div class="report-actions" style="margin-top:12px">'+editAction+'<button type="button" class="btn btn-secondary" id="scannerScanAgain">Scan Lagi</button></div></div>');if(isAdmin){onFinal('scannerEditProduct','click',async function(){try{await ensureMasterCaches();openProductModal(p);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}});}onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult','Siap scan berikutnya.');setHTMLFinal('scannerFinalProduct','');startFinalScanner();});}else{var admin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';var saveAction=admin?'<button type="button" class="btn btn-primary" id="scannerSaveNewProduct">Simpan sebagai Barang</button>':'<div class="info-strip scanner-prefill-note">Barcode belum terdaftar. Hubungi Admin untuk menyimpan barcode ini sebagai Master Barang.</div>';setHTMLFinal('scannerFinalProduct','<div class="panel scanner-product-card" style="margin-top:12px"><div class="panel-header"><h4 class="panel-title">Barcode belum terdaftar</h4><span class="badge warning">Baru</span></div><p class="panel-copy">Barcode <strong>'+escFinal(clean)+'</strong> belum memiliki data barang.'+(admin?' Simpan sebagai barang baru untuk melengkapi SKU, nama, kategori, supplier, stok minimum/maksimum, harga, dan lokasi.':'')+'</p><div class="report-actions" style="margin-top:12px">'+saveAction+'<button type="button" class="btn btn-secondary" id="scannerScanAgain">Scan Lagi</button></div></div>');if(admin){onFinal('scannerSaveNewProduct','click',async function(){try{await ensureMasterCaches();openProductModal({barcode:clean},{forceCreate:true,fromScanner:true});}catch(err){showGlobalMessage(friendlyFinal(err),'error');}});}onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult','Siap scan berikutnya.');setHTMLFinal('scannerFinalProduct','');startFinalScanner();});}}catch(err){showGlobalMessage(friendlyFinal(err),'error');}}
 
   function headingFinal(t,d,a){return '<div class="page-heading flex-heading"><div><h3>'+escFinal(t)+'</h3><p>'+escFinal(d)+'</p></div>'+(a||'')+'</div>';}
   function fieldFinal(id,label,val,max,req,type){return '<div class="form-group"><label>'+escFinal(label)+'</label><input id="'+id+'" class="field" type="'+(type||'text')+'" maxlength="'+max+'" '+(req?'required':'')+' value="'+escFinal(val||'')+'"></div>';}
@@ -1416,6 +1497,7 @@
   }
 
   function closeModal() {
+    stopProductScanner();
     var existing = document.getElementById('modalOverlay');
     if (existing) existing.remove();
   }
