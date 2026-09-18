@@ -17,6 +17,8 @@ var SESSION_TTL_SECONDS = 8 * 60 * 60;
 var LOGIN_FAILURE_PREFIX = 'ATK_LOGIN_FAIL_';
 var LOGIN_MAX_FAILURES = 5;
 var LOGIN_WINDOW_SECONDS = 15 * 60;
+var LOGIN_USER_CACHE_PREFIX = 'ATK_LOGIN_USER_';
+var LOGIN_USER_CACHE_SECONDS = 30;
 
 var PUBLIC_ACTIONS = {
   login: true
@@ -43,6 +45,7 @@ var ADMIN_ACTIONS = {
   receivePurchaseOrder: true,
   stockReport: true,
   bulkUpsertProducts: true,
+  updatePurchaseOrderStatus: true,
   listUsers: true,
   saveUser: true
 };
@@ -169,6 +172,47 @@ function getOrCreateApiKey() {
   return key;
 }
 
+function getLoginUserByUsername_(username) {
+  var normalized = normalizeUsername_(username);
+  var cache = CacheService.getScriptCache();
+  var cacheKey = LOGIN_USER_CACHE_PREFIX + normalized;
+  var cached = cache.get(cacheKey);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (err) {
+      cache.remove(cacheKey);
+    }
+  }
+
+  var users = getRowsAsObjects_(getSheet_(SHEETS.USERS));
+  for (var i = 0; i < users.length; i++) {
+    if (normalizeUsername_(users[i].username) === normalized) {
+      var user = users[i];
+      try {
+        cache.put(cacheKey, JSON.stringify(user), LOGIN_USER_CACHE_SECONDS);
+      } catch (cacheErr) {
+        /* Cache failure must never block login. */
+      }
+      return user;
+    }
+  }
+
+  return null;
+}
+
+function clearLoginUserCache_(username) {
+  if (!username) return;
+  try {
+    CacheService.getScriptCache().remove(
+      LOGIN_USER_CACHE_PREFIX + normalizeUsername_(username)
+    );
+  } catch (err) {
+    /* Cache failure must never block user changes. */
+  }
+}
+
 function handleLogin_(data) {
   var username = String(data.username || '').trim();
   var password = String(data.password || '');
@@ -183,15 +227,7 @@ function handleLogin_(data) {
 
   enforceLoginRateLimit_(username);
 
-  var users = getRowsAsObjects_(getSheet_(SHEETS.USERS));
-  var user = null;
-
-  for (var i = 0; i < users.length; i++) {
-    if (String(users[i].username || '').toLowerCase() === username.toLowerCase()) {
-      user = users[i];
-      break;
-    }
-  }
+  var user = getLoginUserByUsername_(username);
 
   if (!user || !toBoolean_(user.active)) {
     recordLoginFailure_(username);
@@ -419,6 +455,9 @@ function routeAction_(action, data, user) {
 
     case 'bulkUpsertProducts':
       return bulkUpsertProductsFinal_(data, user);
+
+    case 'updatePurchaseOrderStatus':
+      return updatePurchaseOrderStatusFinal_(data, user);
 
     case 'listUsers':
       return listUsers_();
@@ -1153,6 +1192,7 @@ function saveUser_(data, currentUser) {
     };
 
     appendObjectRow_(sheet, HEADERS[SHEETS.USERS], user);
+    clearLoginUserCache_(user.username);
 
     return {
       item: sanitizeUser_(user)
@@ -1169,6 +1209,7 @@ function saveUser_(data, currentUser) {
   }
 
   var existing = getObjectByRow_(sheet, rowNumber);
+  var existingUsername = String(existing.username || '');
 
   if (String(existing.userId) === String(currentUser.userId) &&
       active === false) {
@@ -1201,6 +1242,8 @@ function saveUser_(data, currentUser) {
   }
 
   setCellByHeader_(sheet, rowNumber, 'updatedAt', nowIso_());
+  clearLoginUserCache_(existingUsername);
+  clearLoginUserCache_(username);
 
   return {
     item: sanitizeUser_(getObjectByRow_(sheet, rowNumber))
@@ -1257,6 +1300,7 @@ function changePassword_(data, user) {
   setCellByHeader_(sheet, rowNumber, 'passwordSalt', passwordData.salt);
   setCellByHeader_(sheet, rowNumber, 'passwordHash', passwordData.hash);
   setCellByHeader_(sheet, rowNumber, 'updatedAt', nowIso_());
+  clearLoginUserCache_(existing.username);
 
   return {
     changed: true
@@ -1920,6 +1964,21 @@ function createPurchaseOrderFinal_(data,user){
   requireAdminFinal_(user);return lockRun_(function(){var sid=String(data.supplierId||'').trim(),items=Array.isArray(data.items)?data.items:[];if(!sid||!items.length)throw createApiError_('VALIDATION_ERROR','Supplier dan minimal satu item wajib.',400);var ss=getRowsAsObjects_(getSheet_(SHEETS.SUPPLIERS));var supplier=ss.find(function(x){return String(x.supplierId)===sid;});if(!supplier||!toBoolean_(supplier.active))throw createApiError_('VALIDATION_ERROR','Supplier tidak valid atau tidak aktif.',400);var ps=getSheet_(SHEETS.PRODUCTS),pos=getSheet_(SHEETS.PURCHASE_ORDERS),pis=getSheet_(SHEETS.PURCHASE_ITEMS),prod=getRowsAsObjects_(ps),seen={},out=[],total=0;items.forEach(function(x){var pid=String(x.productId||''),q=Number(x.qtyOrdered),price=Number(x.price);if(seen[pid])throw createApiError_('VALIDATION_ERROR','Produk duplicate dalam PO.',400);seen[pid]=1;if(!isFinite(q)||q<=0||!isFinite(price)||price<0)throw createApiError_('VALIDATION_ERROR','Qty/Harga PO tidak valid.',400);var p=prod.find(function(z){return String(z.productId)===pid;});if(!p)throw createApiError_('NOT_FOUND','Produk PO tidak ditemukan.',404);var sub=q*price;total+=sub;out.push({poItemId:Utilities.getUuid(),poId:'',productId:pid,sku:String(p.sku||''),productName:String(p.name||''),unit:String(p.unit||''),qtyOrdered:q,qtyReceived:0,qtyRemaining:q,price:price,subtotal:sub});});var poId=Utilities.getUuid(),po={poId:poId,poNo:nextDocumentNoFinal_('PO'),supplierId:sid,supplierName:String(supplier.name),orderDate:normalizeDateFinal_(data.orderDate),status:'DRAFT',totalAmount:total,createdBy:String(user.name||user.username),createdAt:nowIso_(),updatedAt:nowIso_()};out.forEach(function(x){x.poId=poId;});appendObjectRow_(pos,HEADERS[SHEETS.PURCHASE_ORDERS],po);appendRowsFinal_(pis,HEADERS[SHEETS.PURCHASE_ITEMS],out);return {purchaseOrder:po,items:out};});
 }
 
+function updatePurchaseOrderStatusFinal_(data,user){
+  requireAdminFinal_(user);
+  return lockRun_(function(){
+    var poId=String(data.poId||'').trim(),status=String(data.status||'').toUpperCase();
+    if(!poId||['ORDERED','CANCELLED'].indexOf(status)<0)throw createApiError_('VALIDATION_ERROR','PO dan status tujuan tidak valid.',400);
+    var sheet=getSheet_(SHEETS.PURCHASE_ORDERS),row=findRowById_(sheet,'poId',poId);
+    if(row<0)throw createApiError_('NOT_FOUND','PO tidak ditemukan.',404);
+    var po=getObjectByRow_(sheet,row),current=String(po.status||'').toUpperCase();
+    if(status==='ORDERED'&&current!=='DRAFT')throw createApiError_('VALIDATION_ERROR','Hanya PO DRAFT yang dapat ditandai ORDERED.',400);
+    if(status==='CANCELLED'&&['DRAFT','ORDERED','PARTIAL'].indexOf(current)<0)throw createApiError_('VALIDATION_ERROR','PO ini tidak dapat dibatalkan.',400);
+    var now=nowIso_();setFieldFinal_(sheet,row,'status',status);setFieldFinal_(sheet,row,'updatedAt',now);
+    return {purchaseOrder:sanitizePurchaseOrderFinal_(getObjectByRow_(sheet,row))};
+  });
+}
+
 function listPurchaseOrdersFinal_(data){var status=String(data.status||'').toUpperCase(),from=normalizeDateOptionalFinal_(data.dateFrom),to=normalizeDateOptionalFinal_(data.dateTo),pos=getRowsAsObjects_(getSheet_(SHEETS.PURCHASE_ORDERS)),pis=getRowsAsObjects_(getSheet_(SHEETS.PURCHASE_ITEMS)),items=[];pos.forEach(function(p){var d=String(p.orderDate||'').slice(0,10);if(status&&String(p.status||'')!==status)return;if(from&&d<from)return;if(to&&d>to)return;items.push({purchaseOrder:sanitizePurchaseOrderFinal_(p),items:pis.filter(function(x){return String(x.poId)===String(p.poId);}).map(sanitizePurchaseItemFinal_)});});items.sort(function(a,b){return String(b.purchaseOrder.createdAt).localeCompare(String(a.purchaseOrder.createdAt));});return {items:items};}
 
 function receivePurchaseOrderFinal_(data, user) {
@@ -2066,3 +2125,12 @@ function sanitizeRequestFinal_(x){return {requestId:String(x.requestId||''),requ
 function sanitizeRequestItemFinal_(x){return {requestItemId:String(x.requestItemId||''),requestId:String(x.requestId||''),productId:String(x.productId||''),sku:String(x.sku||''),productName:String(x.productName||''),unit:String(x.unit||''),qtyRequested:Number(x.qtyRequested||0),qtyApproved:Number(x.qtyApproved||0),stockAtRequest:Number(x.stockAtRequest||0),note:String(x.note||'')};}
 function sanitizePurchaseOrderFinal_(x){return {poId:String(x.poId||''),poNo:String(x.poNo||''),supplierId:String(x.supplierId||''),supplierName:String(x.supplierName||''),orderDate:String(x.orderDate||''),status:String(x.status||''),totalAmount:Number(x.totalAmount||0),createdBy:String(x.createdBy||''),createdAt:String(x.createdAt||''),updatedAt:String(x.updatedAt||'')};}
 function sanitizePurchaseItemFinal_(x){return {poItemId:String(x.poItemId||''),poId:String(x.poId||''),productId:String(x.productId||''),sku:String(x.sku||''),productName:String(x.productName||''),unit:String(x.unit||''),qtyOrdered:Number(x.qtyOrdered||0),qtyReceived:Number(x.qtyReceived||0),qtyRemaining:Number(x.qtyRemaining||0),price:Number(x.price||0),subtotal:Number(x.subtotal||0)};}
+
+
+/* TEMPORARY SETUP HELPER - remove after initial Vercel configuration. */
+function showATKApiKey() {
+  var key = getOrCreateApiKey();
+  Logger.log('ATK_API_KEY=' + key);
+  console.log('ATK_API_KEY=' + key);
+  return key;
+}
