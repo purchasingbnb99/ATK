@@ -491,7 +491,7 @@
       '<div class="welcome-card">' +
       '<div><strong>Selamat datang, ' + escapeHtml(name) + '</strong>' +
       '<p>Master Data sudah aktif. Kategori, Supplier, Barang, dan User Management terhubung ke Google Sheets melalui Vercel Proxy dan Google Apps Script.</p></div>' +
-      '<span class="badge">Stage 4</span>' +
+      '<span class="badge">FINAL</span>' +
       '</div>' +
       '<div class="stat-grid">' +
       statCard('Barang Aktif', number(summary.products)) +
