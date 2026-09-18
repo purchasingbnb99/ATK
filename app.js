@@ -375,7 +375,7 @@
 
       var button = document.createElement('button');
       button.type = 'button';
-      button.className = 'nav-item';
+      button.className = 'nav-item nav-action-' + String(item.action).replace(/[^a-zA-Z0-9_-]/g, '-');
       button.setAttribute('data-action', item.action);
       button.innerHTML =
         '<span class="nav-icon">' + escapeHtml(item.icon) + '</span>' +
@@ -483,17 +483,11 @@
     var result = await apiRequest('dashboard', {});
     var summary = result.data && result.data.summary ? result.data.summary : {};
     var role = String(state.user && state.user.role || '').toUpperCase();
-    var name = String(state.user && (state.user.name || state.user.username) || 'User');
 
     content.innerHTML =
       '<div class="page-heading">' +
       '<h3>Dashboard</h3>' +
       '<p>Ringkasan sistem ATK Inventory.</p>' +
-      '</div>' +
-      '<div class="welcome-card">' +
-      '<div><strong>Selamat datang, ' + escapeHtml(name) + '</strong>' +
-      '<p>Master Data sudah aktif. Kategori, Supplier, Barang, dan User Management terhubung ke Google Sheets melalui Vercel Proxy dan Google Apps Script.</p></div>' +
-      '<span class="badge">FINAL</span>' +
       '</div>' +
       '<div class="stat-grid">' +
       statCard('Barang Aktif', number(summary.products)) +

@@ -710,3 +710,163 @@ textarea.field { resize: vertical; min-height: 90px; }
   .barcode-scan-btn { width: 100%; }
   .inline-scanner .report-actions .btn { flex: 1 1 140px; }
 }
+
+/* ================================================================
+   UI POLISH - COLORFUL MODULE CARDS + GLOW + MODERN BACKGROUND
+   ================================================================ */
+
+body {
+  position: relative;
+  background:
+    radial-gradient(circle at 10% 8%, rgba(59, 130, 246, 0.12), transparent 30%),
+    radial-gradient(circle at 90% 18%, rgba(139, 92, 246, 0.10), transparent 28%),
+    radial-gradient(circle at 70% 88%, rgba(16, 185, 129, 0.08), transparent 26%),
+    linear-gradient(180deg, #f8fbff 0%, #f1f5f9 45%, #eef4fb 100%);
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .46;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.055) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.main-area {
+  background:
+    radial-gradient(circle at 15% 0%, rgba(59, 130, 246, 0.08), transparent 26%),
+    radial-gradient(circle at 86% 12%, rgba(124, 58, 237, 0.06), transparent 24%),
+    transparent;
+}
+
+.content-area {
+  position: relative;
+}
+
+/* Every sidebar module is now a compact visual card. */
+.nav-list {
+  padding: 15px 10px 18px;
+}
+
+.nav-item {
+  --nav-bg: #f8fafc;
+  --nav-border: #e2e8f0;
+  --nav-accent: #475569;
+  --nav-glow: rgba(71, 85, 105, 0.20);
+  position: relative;
+  min-height: 48px;
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--nav-border);
+  border-radius: 13px;
+  background: linear-gradient(135deg, var(--nav-bg), #ffffff);
+  color: #1e293b;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.035);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease;
+}
+
+.nav-item::before {
+  content: '';
+  width: 4px;
+  height: 22px;
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--nav-accent);
+  opacity: .9;
+}
+
+.nav-item:hover,
+.nav-item:focus-visible {
+  transform: translateX(3px);
+  border-color: var(--nav-accent);
+  box-shadow:
+    0 0 0 3px var(--nav-glow),
+    0 10px 22px rgba(15, 23, 42, 0.10);
+  outline: none;
+}
+
+.nav-item.active {
+  color: var(--text);
+  border-color: var(--nav-accent);
+  background: linear-gradient(135deg, var(--nav-bg), #ffffff);
+  box-shadow:
+    0 0 0 3px var(--nav-glow),
+    0 8px 20px rgba(15, 23, 42, 0.10);
+}
+
+.nav-item.active .nav-icon,
+.nav-item:hover .nav-icon,
+.nav-item:focus-visible .nav-icon {
+  color: var(--nav-accent);
+  opacity: 1;
+}
+
+.nav-icon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: var(--nav-accent);
+  opacity: .9;
+  font-size: .98rem;
+  font-weight: 900;
+  border-radius: 8px;
+  background: rgba(255,255,255,.78);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.55);
+}
+
+.nav-action-dashboard { --nav-bg:#eff6ff; --nav-border:#bfdbfe; --nav-accent:#2563eb; --nav-glow:rgba(37,99,235,.18); }
+.nav-action-listProducts { --nav-bg:#eef2ff; --nav-border:#c7d2fe; --nav-accent:#4f46e5; --nav-glow:rgba(79,70,229,.18); }
+.nav-action-listCategories { --nav-bg:#f5f3ff; --nav-border:#ddd6fe; --nav-accent:#7c3aed; --nav-glow:rgba(124,58,237,.18); }
+.nav-action-listSuppliers { --nav-bg:#ecfdf5; --nav-border:#a7f3d0; --nav-accent:#059669; --nav-glow:rgba(5,150,105,.18); }
+.nav-action-listUsers { --nav-bg:#fff7ed; --nav-border:#fed7aa; --nav-accent:#ea580c; --nav-glow:rgba(234,88,12,.18); }
+.nav-action-receiveStock { --nav-bg:#ecfeff; --nav-border:#a5f3fc; --nav-accent:#0891b2; --nav-glow:rgba(8,145,178,.18); }
+.nav-action-barcodeScanner { --nav-bg:#eff6ff; --nav-border:#bae6fd; --nav-accent:#0284c7; --nav-glow:rgba(2,132,199,.18); }
+.nav-action-adjustStock { --nav-bg:#fffbeb; --nav-border:#fde68a; --nav-accent:#d97706; --nav-glow:rgba(217,119,6,.18); }
+.nav-action-listMovements { --nav-bg:#f8fafc; --nav-border:#cbd5e1; --nav-accent:#475569; --nav-glow:rgba(71,85,105,.18); }
+.nav-action-reorderRecommendations { --nav-bg:#fff1f2; --nav-border:#fecdd3; --nav-accent:#e11d48; --nav-glow:rgba(225,29,72,.18); }
+.nav-action-listPurchaseOrders { --nav-bg:#faf5ff; --nav-border:#e9d5ff; --nav-accent:#9333ea; --nav-glow:rgba(147,51,234,.18); }
+.nav-action-receivePurchaseOrder { --nav-bg:#f0fdfa; --nav-border:#99f6e4; --nav-accent:#0f766e; --nav-glow:rgba(15,118,110,.18); }
+.nav-action-listRequests { --nav-bg:#fdf2f8; --nav-border:#fbcfe8; --nav-accent:#db2777; --nav-glow:rgba(219,39,119,.18); }
+.nav-action-stockReport { --nav-bg:#f0fdf4; --nav-border:#bbf7d0; --nav-accent:#16a34a; --nav-glow:rgba(22,163,74,.18); }
+.nav-action-bulkUpsertProducts { --nav-bg:#eff6ff; --nav-border:#bfdbfe; --nav-accent:#1d4ed8; --nav-glow:rgba(29,78,216,.18); }
+.nav-action-exportExcel { --nav-bg:#ecfdf5; --nav-border:#a7f3d0; --nav-accent:#047857; --nav-glow:rgba(4,120,87,.18); }
+.nav-action-changePassword { --nav-bg:#f8fafc; --nav-border:#cbd5e1; --nav-accent:#334155; --nav-glow:rgba(51,65,85,.18); }
+.nav-action-searchProducts { --nav-bg:#f0f9ff; --nav-border:#bae6fd; --nav-accent:#0369a1; --nav-glow:rgba(3,105,161,.18); }
+.nav-action-createRequest { --nav-bg:#f0fdf4; --nav-border:#bbf7d0; --nav-accent:#15803d; --nav-glow:rgba(21,128,61,.18); }
+.nav-action-myRequests { --nav-bg:#fff7ed; --nav-border:#fed7aa; --nav-accent:#c2410c; --nav-glow:rgba(194,65,12,.18); }
+.nav-action-printRequests { --nav-bg:#f5f3ff; --nav-border:#ddd6fe; --nav-accent:#6d28d9; --nav-glow:rgba(109,40,217,.18); }
+
+/* Dashboard information cards get a clean visual hierarchy. */
+.dashboard-grid .panel {
+  background: rgba(255,255,255,.88);
+  backdrop-filter: blur(10px);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+
+.dashboard-grid .panel:hover {
+  transform: translateY(-2px);
+  border-color: #cbd5e1;
+  box-shadow: 0 12px 28px rgba(15,23,42,.08);
+}
+
+@media (max-width: 760px) {
+  body::before { opacity: .32; background-size: 24px 24px; }
+  .nav-item { min-height: 50px; margin: 5px 0; }
+  .nav-item:hover,
+  .nav-item:focus-visible { transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-item,
+  .dashboard-grid .panel,
+  .stat-grid .stat-card { transition: none; }
+}

@@ -1,4 +1,4 @@
-# ATK Inventory — FINAL
+# ATK Inventory — FINAL Mobile UI + Barcode
 
 ## Arsitektur
 
@@ -254,3 +254,8 @@ End-to-end production test tetap memerlukan URL Apps Script `/exec`, API key asl
 ## Pembaruan Mobile & Barcode
 
 Dashboard berwarna, scan barcode pada form Master Barang, serta alur simpan/edit dari modul Barcode Scanner sudah ditambahkan.
+
+
+## UI terbaru
+
+Versi ini mempertahankan backend dan API yang sudah berfungsi, dengan penyempurnaan frontend: menu modul pada sidebar tampil sebagai kartu berwarna, memiliki efek glow saat hover/focus, dashboard memakai kartu statistik berwarna, dan background aplikasi menggunakan pola/grid halus berbasis CSS. Layout tetap responsif untuk desktop dan HP.
