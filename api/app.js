@@ -105,8 +105,9 @@ async function readUpstreamResponse(response) {
   var parsed = null;
 
   if (text) {
+    var normalizedText = text.replace(/^\uFEFF/, '').trim();
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(normalizedText);
     } catch (err) {
       parsed = null;
     }
@@ -117,6 +118,23 @@ async function readUpstreamResponse(response) {
     contentType: contentType,
     parsed: parsed
   };
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  var timer = null;
+  var requestOptions = options || {};
+
+  if (controller) {
+    requestOptions.signal = controller.signal;
+    timer = setTimeout(function () { controller.abort(); }, timeoutMs);
+  }
+
+  try {
+    return await fetch(url, requestOptions);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 module.exports = async function handler(req, res) {
@@ -161,21 +179,22 @@ module.exports = async function handler(req, res) {
     var upstreamResponse;
 
     try {
-      upstreamResponse = await fetch(appsScriptUrl, {
+      upstreamResponse = await fetchWithTimeout(appsScriptUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
         body: JSON.stringify(payload)
-      });
+      }, 15000);
     } catch (networkErr) {
+      var isTimeout = networkErr && networkErr.name === 'AbortError';
       return jsonResponse(
         res,
         502,
         buildProxyError(
-          'UPSTREAM_NETWORK_ERROR',
-          'Proxy tidak dapat terhubung ke Google Apps Script.',
+          isTimeout ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_NETWORK_ERROR',
+          isTimeout ? 'Google Apps Script terlalu lama merespons.' : 'Proxy tidak dapat terhubung ke Google Apps Script.',
           502
         )
       );
