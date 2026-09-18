@@ -258,4 +258,15 @@ Dashboard berwarna, scan barcode pada form Master Barang, serta alur simpan/edit
 
 ## UI terbaru
 
+Pembaruan production-ready:
+- Login error lebih ramah dan timeout request untuk mencegah layar menggantung.
+- Pencarian user saat login menggunakan cache server singkat agar login berulang lebih cepat.
+- Barang Masuk mendukung scan barcode dengan kamera dan fallback pilihan barang manual.
+- Laporan transaksi mendukung filter tanggal.
+- Import Excel memvalidasi baris sebelum commit dan menahan commit bila ada error preview.
+- Tanggal default browser menggunakan timezone Asia/Jakarta untuk menghindari tanggal bergeser di sekitar tengah malam.
+- Scanner dihentikan ketika berpindah modul/logout sehingga kamera tidak tertinggal aktif.
+- Library Excel dan barcode dimuat secara lazy saat modul terkait dibuka, sehingga halaman login lebih ringan.
+- Purchase Order dapat ditandai `ORDERED` dan dibatalkan dengan kontrol status yang tervalidasi backend.
+
 Versi ini mempertahankan backend dan API yang sudah berfungsi, dengan penyempurnaan frontend: menu modul pada sidebar tampil sebagai kartu berwarna, memiliki efek glow saat hover/focus, dashboard memakai kartu statistik berwarna, dan background aplikasi menggunakan pola/grid halus berbasis CSS. Layout tetap responsif untuk desktop dan HP.
