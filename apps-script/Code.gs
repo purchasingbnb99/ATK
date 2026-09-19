@@ -593,7 +593,7 @@ function handleDashboard_(user) {
     if (String(row.type || '').toUpperCase() !== 'OUT') return;
     var movementDate = dateOnlyFinal_(row.movementDate);
     if (!movementDate || movementDate < startDate || movementDate > today) return;
-    var qty = Math.max(0, toNumber_(row.qty));
+    var qty = Math.abs(toNumber_(row.qty));
     usageMap[movementDate] = (usageMap[movementDate] || 0) + qty;
     totalOut30 += qty;
     var pid = String(row.productId || '');
@@ -612,16 +612,6 @@ function handleDashboard_(user) {
   requests.forEach(function (x) { if (String(x.status || '').toUpperCase() === 'MENUNGGU') pendingRequests++; });
   var openPurchaseOrders = 0;
   purchaseOrders.forEach(function (x) { if (['DRAFT', 'ORDERED', 'PARTIAL'].indexOf(String(x.status || '').toUpperCase()) >= 0) openPurchaseOrders++; });
-
-  if (user && user.publicStaff) {
-    return {
-      user: sanitizeSessionUser_(user),
-      summary: { products: activeProducts },
-      usage30Days: [],
-      topUsedProducts: [],
-      alerts: {}
-    };
-  }
 
   return {
     user: sanitizeSessionUser_(user),
