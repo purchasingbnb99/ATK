@@ -972,3 +972,8 @@ body::before {
 .select-all{display:inline-flex;align-items:center;gap:8px;font-size:.82rem;font-weight:800;color:var(--text);cursor:pointer}
 .select-all input,.frSelect{width:18px;height:18px;accent-color:#2563eb}
 .selected-print-area{position:absolute;left:-100000px;top:0;width:1000px;background:#fff;color:#111;padding:20px}
+
+.readonly-field { background: #eef2f7 !important; color: #64748b !important; border-color: #d7dee8 !important; cursor: not-allowed; font-weight: 600; }
+.readonly-field:focus { box-shadow: none !important; }
+.request-product-summary { margin-top: 3px; line-height: 1.35; }
+.badge.danger { background: #fee2e2; color: #b91c1c; }
