@@ -9,7 +9,8 @@
   'use strict';
 
   var STORAGE_KEYS = {
-    SESSION: 'atk_inventory_session'
+    SESSION: 'atk_inventory_session',
+    STAFF_CLIENT_PREFIX: 'atk_staff_client_id_'
   };
 
   var API_ENDPOINT = '/api/app';
@@ -124,6 +125,10 @@
         name.focus();
         try { name.value = window.localStorage.getItem('atk_staff_name') || ''; } catch (err) {}
       }
+      var department = document.getElementById('staffDepartmentInput');
+      if (department) {
+        try { department.value = window.localStorage.getItem('atk_staff_department') || 'General'; } catch (err2) {}
+      }
     }
   }
 
@@ -136,6 +141,23 @@
     if (staffButton) staffButton.classList.remove('hidden');
     if (staffForm) staffForm.classList.add('hidden');
     if (error) error.classList.add('hidden');
+  }
+
+  function getOrCreateStaffClientId(name, department) {
+    var identity = String(name || '').trim().toLowerCase() + '|' + String(department || '').trim().toLowerCase();
+    var storageKey = STORAGE_KEYS.STAFF_CLIENT_PREFIX + encodeURIComponent(identity).slice(0, 180);
+    var existing = '';
+    try { existing = String(window.localStorage.getItem(storageKey) || '').trim(); } catch (err) { existing = ''; }
+    if (existing) return existing;
+    var created = '';
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') created = window.crypto.randomUUID();
+    } catch (err2) {}
+    if (!created) {
+      created = 'staff-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+    }
+    try { window.localStorage.setItem(storageKey, created); } catch (err3) {}
+    return created;
   }
 
   async function handleStaffEntrySubmit(event) {
@@ -157,7 +179,8 @@
     try {
       var result = await apiRequest('createStaffSession', {
         name: name,
-        department: department
+        department: department,
+        clientId: getOrCreateStaffClientId(name, department)
       }, false);
       if (!result.ok || !result.data || !result.data.sessionToken) {
         throw { code: 'STAFF_ENTRY_FAILED', message: 'Mode Staff tidak dapat dibuka.', status: 400 };
@@ -1681,38 +1704,107 @@
   }
 
   async function renderFinalRequests(content,printOnly){
-    var r=await apiFinal('listRequests',{});state.requests=r.data.items||[];var admin=String(state.user.role).toUpperCase()==='ADMIN';
-    var title = admin ? 'Approval Pengajuan' : (printOnly ? 'Print Pengajuan' : 'Pengajuan Saya');
-    var desc = admin ? 'Approve penuh, approve sebagian, atau reject dengan alasan.' : (printOnly ? 'Cetak daftar pengajuan yang dibuat oleh akun Staff.' : 'Lihat pengajuan sendiri dan batalkan yang masih MENUNGGU.');
-    var actionHtml = printOnly ? '<button class="btn btn-secondary no-print" id="frPrintNow">Print</button>' : (!admin ? '<button class="btn btn-primary no-print" id="frNewReq">+ Pengajuan</button>' : '');
-    var filterHtml = admin && !printOnly ? '<div class="request-filter no-print"><input id="frSearch" class="field" type="search" placeholder="Cari No Pengajuan / Staff / Departemen / Barang..."><select id="frStatusFilter" class="field"><option value="">Semua Status</option><option value="MENUNGGU">Menunggu</option><option value="DISETUJUI_PENUH">Disetujui Penuh</option><option value="DISETUJUI_SEBAGIAN">Disetujui Sebagian</option><option value="DITOLAK">Ditolak</option><option value="DIBATALKAN">Dibatalkan</option></select></div>' : '';
+    var admin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';
+    var actionName=printOnly?'listPrintableRequests':'listRequests';
+    var r=await apiFinal(actionName,{});
+    state.requests=r.data.items||[];
+    var title=admin?'Approval Pengajuan':(printOnly?'Print Pengajuan':'Pengajuan Saya');
+    var desc=admin?'Approve penuh, approve sebagian, atau reject dengan alasan.':(printOnly?'Cari dan cetak pengajuan dari seluruh Staff.':'Cari pengajuan Anda dan batalkan yang masih MENUNGGU.');
+    var actionHtml=printOnly
+      ? '<div class="report-actions no-print"><button class="btn btn-secondary" id="frPrintNow">Print yang Dipilih <span id="frSelectedCount">0</span></button></div>'
+      : (!admin ? '<button class="btn btn-primary no-print" id="frNewReq">+ Pengajuan</button>' : '');
+    var filterHtml='<div class="request-filter no-print">'+
+      '<input id="frSearch" class="field" type="search" placeholder="Cari No Pengajuan / Staff / Departemen / Barang...">'+
+      '<input id="frFrom" class="field" type="date" aria-label="Tanggal mulai">'+
+      '<input id="frTo" class="field" type="date" aria-label="Tanggal sampai">'+
+      (admin||printOnly?'<select id="frStatusFilter" class="field"><option value="">Semua Status</option><option value="MENUNGGU">Menunggu</option><option value="DISETUJUI_PENUH">Disetujui Penuh</option><option value="DISETUJUI_SEBAGIAN">Disetujui Sebagian</option><option value="DITOLAK">Ditolak</option><option value="DIBATALKAN">Dibatalkan</option></select>':'')+
+      '<button type="button" class="btn btn-primary" id="frApply">Cari</button><button type="button" class="btn btn-secondary" id="frReset">Reset</button>'+
+      '</div>'+
+      (printOnly?'<div class="request-toolbar no-print"><label class="select-all"><input id="frSelectAll" type="checkbox"><span>Pilih semua yang tampil</span></label></div>':'');
+    var head=printOnly?'<th class="no-print">✓</th>':'';
     content.innerHTML=pageHeaderBlock(title,desc,actionHtml)+filterHtml+
-      '<div class="panel"><div class="table-wrap" id="requestPrintArea"><table class="data-table"><thead><tr><th>No</th><th>Tanggal / Jam</th><th>Staff</th><th>Dept</th><th>Items</th><th>Status</th><th class="no-print">Aksi</th></tr></thead><tbody id="frReqBody">'+requestRowsFinal()+'</tbody></table></div></div>';
-    onFinal('frNewReq','click',function(){state.activePage='createRequest';renderPage('createRequest');});
-    onFinal('frPrintNow','click',function(){printHtmlFinal('requestPrintArea','Pengajuan Barang');});
-    onFinal('frSearch','input',renderFilteredRequestRowsFinal);
-    onFinal('frStatusFilter','change',renderFilteredRequestRowsFinal);
+      '<div class="panel"><div class="table-wrap" id="requestPrintArea"><table class="data-table"><thead><tr>'+head+'<th>No</th><th>Tanggal / Jam</th><th>Staff</th><th>Dept</th><th>Items</th><th>Status</th><th class="no-print">Aksi</th></tr></thead><tbody id="frReqBody">'+requestRowsFinal('', '', printOnly)+'</tbody></table></div></div>'+
+      (printOnly?'<div id="frSelectedPrintArea" class="selected-print-area" aria-hidden="true"></div>':'');
+    if(!printOnly){
+      onFinal('frNewReq','click',function(){state.activePage='createRequest';renderPage('createRequest');});
+    }
+    onFinal('frPrintNow','click',printSelectedRequestsFinal);
+    onFinal('frSearch','keydown',function(e){if(e.key==='Enter'){e.preventDefault();renderFilteredRequestRowsFinal();}});
+    onFinal('frApply','click',renderFilteredRequestRowsFinal);
+    onFinal('frReset','click',function(){setValueFinal('frSearch','');setValueFinal('frFrom','');setValueFinal('frTo','');setValueFinal('frStatusFilter','');var all=byIdFinal('frSelectAll');if(all)all.checked=false;renderFilteredRequestRowsFinal();});
+    onFinal('frSelectAll','change',function(){var checked=this.checked;document.querySelectorAll('.frSelect').forEach(function(c){c.checked=checked;});updateSelectedPrintCountFinal();});
+    onFinal('frSelectAll','change',function(){var checked=this.checked;document.querySelectorAll('.frSelect').forEach(function(c){c.checked=checked;});updateSelectedPrintCountFinal();});
     bindFinalRequestButtons();
+    updateSelectedPrintCountFinal();
   }
 
-  function requestRowsFinal(query,status){
-    var admin=String(state.user.role).toUpperCase()==='ADMIN';
+  function requestRowsFinal(query,status,printOnly){
+    var admin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';
     var q=String(query||'').trim().toLowerCase();
     var st=String(status||'').trim().toUpperCase();
+    var from=valFinal('frFrom'),to=valFinal('frTo');
     var filtered=state.requests.filter(function(x){
       var r=x.request||{};
       if(st&&String(r.status||'').toUpperCase()!==st)return false;
+      var d=String(r.requestDate||'').slice(0,10);
+      if(from&&(!d||d<from))return false;
+      if(to&&(!d||d>to))return false;
       if(!q)return true;
-      var hay=[r.requestNo,r.staffName,r.department,r.status].concat((x.items||[]).map(function(i){return i.productName+' '+i.sku;})).join(' ').toLowerCase();
+      var hay=[r.requestNo,r.staffName,r.department,r.status,r.requestDate,r.createdAt].concat((x.items||[]).map(function(i){return i.productName+' '+i.sku;})).join(' ').toLowerCase();
       return hay.indexOf(q)>=0;
     });
-    if(!filtered.length)return emptyRowFinal(7,'Tidak ada pengajuan yang sesuai.');
-    return filtered.map(function(x){var r=x.request||{};var stamp=r.createdAt||r.requestDate;return '<tr><td><strong>'+escFinal(r.requestNo)+'</strong></td><td>'+escFinal(formatRequestDateTimeFinal(stamp))+'</td><td>'+escFinal(r.staffName)+'</td><td>'+escFinal(r.department||'-')+'</td><td>'+fmtFinal((x.items||[]).length)+'</td><td>'+statusFinal(r.status)+'</td><td class="no-print"><div class="action-group"><button class="btn btn-secondary btn-sm frView" data-id="'+escFinal(r.requestId)+'">Detail</button>'+(admin&&r.status==='MENUNGGU'?'<button class="btn btn-success btn-sm frApprove" data-id="'+escFinal(r.requestId)+'">Approve</button><button class="btn btn-danger btn-sm frReject" data-id="'+escFinal(r.requestId)+'">Reject</button>':'')+(!admin&&r.status==='MENUNGGU'?'<button class="btn btn-danger btn-sm frCancel" data-id="'+escFinal(r.requestId)+'">Batalkan</button>':'')+'</div></td></tr>';}).join('');
+    if(!filtered.length)return emptyRowFinal(printOnly?8:7,'Tidak ada pengajuan yang sesuai.');
+    return filtered.map(function(x){
+      var r=x.request||{},stamp=r.createdAt||r.requestDate;
+      var check=printOnly?'<td class="no-print"><input class="frSelect" type="checkbox" data-id="'+escFinal(r.requestId)+'" aria-label="Pilih '+escFinal(r.requestNo)+'"></td>':'';
+      var action='';
+      if(printOnly){
+        action='<button class="btn btn-secondary btn-sm frView" data-id="'+escFinal(r.requestId)+'">Detail</button>';
+      }else{
+        action='<button class="btn btn-secondary btn-sm frView" data-id="'+escFinal(r.requestId)+'">Detail</button>'+
+          (admin&&r.status==='MENUNGGU'?'<button class="btn btn-success btn-sm frApprove" data-id="'+escFinal(r.requestId)+'">Approve</button><button class="btn btn-danger btn-sm frReject" data-id="'+escFinal(r.requestId)+'">Reject</button>':'')+
+          (!admin&&r.status==='MENUNGGU'?'<button class="btn btn-danger btn-sm frCancel" data-id="'+escFinal(r.requestId)+'">Batalkan</button>':'');
+      }
+      return '<tr>'+check+'<td><strong>'+escFinal(r.requestNo)+'</strong></td><td>'+escFinal(formatRequestDateTimeFinal(stamp))+'</td><td>'+escFinal(r.staffName)+'</td><td>'+escFinal(r.department||'-')+'</td><td>'+fmtFinal((x.items||[]).length)+'</td><td>'+statusFinal(r.status)+'</td><td class="no-print"><div class="action-group">'+action+'</div></td></tr>';
+    }).join('');
   }
 
   function renderFilteredRequestRowsFinal(){
-    setHTMLFinal('frReqBody',requestRowsFinal(valFinal('frSearch'),valFinal('frStatusFilter')));
+    setHTMLFinal('frReqBody',requestRowsFinal(valFinal('frSearch'),valFinal('frStatusFilter'),String(state.activePage)==='printRequests'));
     bindFinalRequestButtons();
+    updateSelectedPrintCountFinal();
+  }
+
+  function updateSelectedPrintCountFinal(){
+    var count=document.querySelectorAll('.frSelect:checked').length;
+    var el=byIdFinal('frSelectedCount');if(el)el.textContent=count?String(count):'0';
+  }
+
+  function buildSelectedPrintHtmlFinal(selected){
+    var parts=[];
+    selected.forEach(function(x,index){
+      var r=x.request||{};
+      parts.push('<section style="page-break-after:'+(index<selected.length-1?'always':'auto')+';padding-bottom:16px">'+
+        '<div class="print-meta"><strong>Pengajuan Barang</strong><span>No: '+escFinal(r.requestNo)+'<br>Dibuat: '+escFinal(formatRequestDateTimeFinal(r.createdAt||r.requestDate))+'</span></div>'+
+        '<table class="data-table"><tbody>'+
+        '<tr><th style="width:22%">Staff</th><td>'+escFinal(r.staffName)+'</td><th style="width:18%">Departemen</th><td>'+escFinal(r.department||'-')+'</td></tr>'+
+        '<tr><th>Tanggal</th><td>'+escFinal(r.requestDate||'-')+'</td><th>Status</th><td>'+escFinal(r.status||'-')+'</td></tr>'+
+        '</tbody></table>'+
+        '<div style="height:10px"></div><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Qty Diminta</th><th>Qty Disetujui</th><th>Catatan</th></tr></thead><tbody>'+((x.items||[]).map(function(i){return '<tr><td>'+escFinal(i.sku)+'</td><td>'+escFinal(i.productName)+'</td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.qtyApproved)+'</td><td>'+escFinal(i.note||'-')+'</td></tr>';}).join('')||'<tr><td colspan="5">Tidak ada item.</td></tr>')+'</tbody></table>'+
+        (r.rejectionReason?'<p><strong>Alasan Reject:</strong> '+escFinal(r.rejectionReason)+'</p>':'')+
+        '</section>');
+    });
+    return parts.join('');
+  }
+
+  function printSelectedRequestsFinal(){
+    var ids=[];document.querySelectorAll('.frSelect:checked').forEach(function(c){ids.push(String(c.dataset.id));});
+    if(!ids.length){showGlobalMessage('Pilih minimal satu pengajuan yang ingin dicetak.','warning');return;}
+    var selected=ids.map(function(id){return state.requests.find(function(x){return x&&x.request&&String(x.request.requestId)===id;});}).filter(Boolean);
+    var area=byIdFinal('frSelectedPrintArea');
+    if(!area){showGlobalMessage('Area cetak tidak ditemukan.','error');return;}
+    area.innerHTML=buildSelectedPrintHtmlFinal(selected);
+    printHtmlFinal('frSelectedPrintArea','Pengajuan Barang Terpilih');
   }
 
   function bindFinalRequestButtons(){document.querySelectorAll('.frView').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openRequestFinal(x);};});document.querySelectorAll('.frApprove').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openApproveFinal(x);};});document.querySelectorAll('.frReject').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openRejectFinal(x);};});document.querySelectorAll('.frCancel').forEach(function(b){b.onclick=async function(){if(!confirm('Batalkan pengajuan ini?'))return;try{await apiFinal('cancelRequest',{requestId:b.dataset.id});showGlobalMessage('Pengajuan dibatalkan.','success');renderPage('listRequests');}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});}
@@ -1730,7 +1822,7 @@
       '<div id="finalReqItems"></div><button class="btn btn-secondary" id="addFinalReqItem">+ Barang</button><form id="finalCreateReqForm" style="margin-top:16px"><div class="form-grid">'+fieldDateFinal('fcrDate','Tanggal')+'</div>'+fieldFinal('fcrNote','Catatan Umum','',500,false)+'<div id="fcrMsg" class="form-message hidden"></div><button class="btn btn-primary">Kirim Pengajuan</button></form></div>';
     addFinalReqRow();
     onFinal('addFinalReqItem','click',addFinalReqRow);
-    onFinal('finalCreateReqForm','submit',async function(e){e.preventDefault();var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});var m=byIdFinal('fcrMsg');if(!rows.length){messageFinal(m,'Minimal satu barang harus dipilih.','error');return;}try{var result=await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});showGlobalMessage('Pengajuan '+(result.data&&result.data.request?result.data.request.requestNo:'')+' berhasil dibuat. Form dikosongkan untuk pengajuan berikutnya.','success');renderPage('createRequest');}catch(err){messageFinal(m,friendlyFinal(err),'error');}});
+    onFinal('finalCreateReqForm','submit',async function(e){e.preventDefault();var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});var m=byIdFinal('fcrMsg');if(!rows.length){messageFinal(m,'Minimal satu barang harus dipilih.','error');return;}try{var result=await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});showGlobalMessage('Pengajuan '+(result.data&&result.data.request?result.data.request.requestNo:'')+' berhasil dibuat. Form dikosongkan untuk pengajuan berikutnya.','success');await renderPage('createRequest');}catch(err){messageFinal(m,friendlyFinal(err),'error');}});
   }
   function addFinalReqRow(){var c=byIdFinal('finalReqItems'),r=document.createElement('div');r.className='form-grid fcr-row';r.innerHTML='<div class="form-group"><label>Barang</label><select class="field fcr-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fcr-qty','Qty',1)+'<div class="form-group"><label>Catatan</label><input class="field fcr-note" maxlength="300"></div><div class="form-group" style="display:flex;align-items:end"><button type="button" class="btn btn-danger fcr-remove">Hapus</button></div>';c.appendChild(r);r.querySelector('.fcr-remove').onclick=function(){r.remove();};}
 
