@@ -52,6 +52,7 @@ var ADMIN_ACTIONS = {
 };
 
 var AUTHENTICATED_ACTIONS = {
+  listPrintableRequests: true,
   logout: true,
   me: true,
   dashboard: true,
@@ -195,9 +196,23 @@ function createStaffSession_(data) {
     throw createApiError_('VALIDATION_ERROR', 'Departemen maksimal 100 karakter.', 400);
   }
 
+  var clientId = String(data.clientId || '').trim();
+  if (!clientId) {
+    throw createApiError_('VALIDATION_ERROR', 'Identitas perangkat Staff tidak ditemukan. Silakan masuk Mode Staff kembali.', 400);
+  }
+  if (!/^[A-Za-z0-9_-]{8,120}$/.test(clientId)) {
+    throw createApiError_('VALIDATION_ERROR', 'Identitas perangkat Staff tidak valid.', 400);
+  }
+
   var token = Utilities.getUuid().replace(/-/g, '') +
     Utilities.getUuid().replace(/-/g, '');
-  var publicUserId = 'PUBLIC_STAFF_' + Utilities.getUuid().replace(/-/g, '');
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, clientId, Utilities.Charset.UTF_8);
+  var digestHex = '';
+  for (var di = 0; di < digest.length; di++) {
+    var hv = (digest[di] < 0 ? digest[di] + 256 : digest[di]).toString(16);
+    digestHex += hv.length === 1 ? '0' + hv : hv;
+  }
+  var publicUserId = 'PUBLIC_STAFF_' + digestHex;
   var now = nowIso_();
   var expiresAt = new Date(new Date().getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
   var session = {
@@ -484,6 +499,9 @@ function routeAction_(action, data, user) {
 
     case 'listRequests':
       return listRequestsFinal_(data, user);
+
+    case 'listPrintableRequests':
+      return listPrintableRequestsFinal_(data, user);
 
     case 'createRequest':
       return createRequestFinal_(data, user);
@@ -1933,11 +1951,40 @@ function createRequestFinal_(data,user){
   });
 }
 
-function listRequestsFinal_(data,user){
+function samePublicStaffIdentityFinal_(row, user){
+  if (!user || user.publicStaff !== true) return false;
+  if (String(row.staffId || '') === String(user.userId || '')) return true;
+  var rowName=String(row.staffName||'').trim().toLowerCase();
+  var rowDept=String(row.department||'').trim().toLowerCase();
+  var userName=String(user.name||'').trim().toLowerCase();
+  var userDept=String(user.department||'').trim().toLowerCase();
+  return rowName && userName && rowName===userName && rowDept===userDept;
+}
+
+function buildRequestListFinal_(data,user,allForPrint){
   var role=String(user.role||'').toUpperCase(),from=normalizeDateOptionalFinal_(data.dateFrom),to=normalizeDateOptionalFinal_(data.dateTo),status=String(data.status||'').toUpperCase();
   var rs=getRowsAsObjects_(getSheet_(SHEETS.REQUESTS)),is=getRowsAsObjects_(getSheet_(SHEETS.REQUEST_ITEMS)),items=[];
-  rs.forEach(function(r){var d=String(r.requestDate||'').slice(0,10);if(role==='STAFF'&&String(r.staffId)!==String(user.userId))return;if(from&&d<from)return;if(to&&d>to)return;if(status&&String(r.status||'').toUpperCase()!==status)return;items.push({request:sanitizeRequestFinal_(r),items:is.filter(function(x){return String(x.requestId)===String(r.requestId);}).map(sanitizeRequestItemFinal_)});});
-  items.sort(function(a,b){return String(b.request.createdAt).localeCompare(String(a.request.createdAt));});return {items:items};
+  rs.forEach(function(r){
+    var d=dateOnlyFinal_(r.requestDate)||String(r.requestDate||'').slice(0,10);
+    if(!allForPrint&&role==='STAFF'&&!samePublicStaffIdentityFinal_(r,user))return;
+    if(from&&(!d||d<from))return;
+    if(to&&(!d||d>to))return;
+    if(status&&String(r.status||'').toUpperCase()!==status)return;
+    items.push({request:sanitizeRequestFinal_(r),items:is.filter(function(x){return String(x.requestId)===String(r.requestId);}).map(sanitizeRequestItemFinal_)});
+  });
+  items.sort(function(a,b){return String(b.request.createdAt||'').localeCompare(String(a.request.createdAt||''))||String(b.request.requestNo||'').localeCompare(String(a.request.requestNo||''));});
+  return {items:items};
+}
+
+function listRequestsFinal_(data,user){
+  return buildRequestListFinal_(data,user,false);
+}
+
+function listPrintableRequestsFinal_(data,user){
+  if (!user || (String(user.role||'').toUpperCase()!=='STAFF' && String(user.role||'').toUpperCase()!=='ADMIN')) {
+    throw createApiError_('FORBIDDEN','Mode Staff atau Admin diperlukan.',403);
+  }
+  return buildRequestListFinal_(data,user,true);
 }
 
 function approveRequestFinal_(data, user) {
@@ -2064,7 +2111,7 @@ function rejectRequestFinal_(data,user){
 }
 
 function cancelRequestFinal_(data,user){
-  requireStaffFinal_(user);return lockRun_(function(){var rid=String(data.requestId||'').trim(),s=getSheet_(SHEETS.REQUESTS),r=findRowById_(s,'requestId',rid);if(r<0)throw createApiError_('NOT_FOUND','Pengajuan tidak ditemukan.',404);var cur=getObjectByRow_(s,r);if(String(cur.staffId)!==String(user.userId))throw createApiError_('FORBIDDEN','Bukan pengajuan milik Anda.',403);if(cur.status!=='MENUNGGU')throw createApiError_('VALIDATION_ERROR','Hanya status MENUNGGU yang dapat dibatalkan.',400);setFieldFinal_(s,r,'status','DIBATALKAN');setFieldFinal_(s,r,'updatedAt',nowIso_());return {request:sanitizeRequestFinal_(getObjectByRow_(s,r))};});
+  requireStaffFinal_(user);return lockRun_(function(){var rid=String(data.requestId||'').trim(),s=getSheet_(SHEETS.REQUESTS),r=findRowById_(s,'requestId',rid);if(r<0)throw createApiError_('NOT_FOUND','Pengajuan tidak ditemukan.',404);var cur=getObjectByRow_(s,r);if(String(cur.staffId)!==String(user.userId)&&!samePublicStaffIdentityFinal_(cur,user))throw createApiError_('FORBIDDEN','Bukan pengajuan milik Anda.',403);if(cur.status!=='MENUNGGU')throw createApiError_('VALIDATION_ERROR','Hanya status MENUNGGU yang dapat dibatalkan.',400);setFieldFinal_(s,r,'status','DIBATALKAN');setFieldFinal_(s,r,'updatedAt',nowIso_());return {request:sanitizeRequestFinal_(getObjectByRow_(s,r))};});
 }
 
 function reorderRecommendationsFinal_(){
