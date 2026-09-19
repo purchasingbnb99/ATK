@@ -482,22 +482,62 @@ function handleDashboard_(user) {
   var categories = getRowsAsObjects_(getSheet_(SHEETS.CATEGORIES));
   var suppliers = getRowsAsObjects_(getSheet_(SHEETS.SUPPLIERS));
   var users = getRowsAsObjects_(getSheet_(SHEETS.USERS));
+  var requests = getRowsAsObjects_(getSheet_(SHEETS.REQUESTS));
+  var purchaseOrders = getRowsAsObjects_(getSheet_(SHEETS.PURCHASE_ORDERS));
+  var movementRows = getRecentRowsAsObjectsFinal_(getSheet_(SHEETS.STOCK_MOVEMENTS), 3000);
 
   var activeProducts = 0;
+  var lowStock = 0;
   for (var i = 0; i < products.length; i++) {
     if (toBoolean_(products[i].active)) {
       activeProducts++;
+      if (toNumber_(products[i].currentStock) <= toNumber_(products[i].minStock)) lowStock++;
     }
   }
 
+  var today = Utilities.formatDate(new Date(), DATABASE_TIMEZONE, 'yyyy-MM-dd');
+  var startDateObj = new Date();
+  startDateObj.setDate(startDateObj.getDate() - 29);
+  var startDate = Utilities.formatDate(startDateObj, DATABASE_TIMEZONE, 'yyyy-MM-dd');
+  var usageMap = {};
+  var productUsage = {};
+  for (var d = 0; d < 30; d++) {
+    var dt = new Date();
+    dt.setDate(dt.getDate() - (29 - d));
+    var ds = Utilities.formatDate(dt, DATABASE_TIMEZONE, 'yyyy-MM-dd');
+    usageMap[ds] = 0;
+  }
+  var totalOut30 = 0;
+  movementRows.forEach(function (row) {
+    if (String(row.type || '').toUpperCase() !== 'OUT') return;
+    var movementDate = dateOnlyFinal_(row.movementDate);
+    if (!movementDate || movementDate < startDate || movementDate > today) return;
+    var qty = Math.max(0, toNumber_(row.qty));
+    usageMap[movementDate] = (usageMap[movementDate] || 0) + qty;
+    totalOut30 += qty;
+    var pid = String(row.productId || '');
+    if (!productUsage[pid]) productUsage[pid] = { productId: pid, sku: String(row.sku || ''), productName: String(row.productName || ''), qty: 0 };
+    productUsage[pid].qty += qty;
+  });
+
+  var usage30Days = Object.keys(usageMap).sort().map(function (ds) {
+    return { date: ds, label: ds.slice(5), qty: usageMap[ds] || 0 };
+  });
+  var topUsedProducts = Object.keys(productUsage).map(function (k) { return productUsage[k]; });
+  topUsedProducts.sort(function (a, c) { return Number(c.qty) - Number(a.qty) || String(a.sku).localeCompare(String(c.sku)); });
+  topUsedProducts = topUsedProducts.slice(0, 5);
+
+  var pendingRequests = 0;
+  requests.forEach(function (x) { if (String(x.status || '').toUpperCase() === 'MENUNGGU') pendingRequests++; });
+  var openPurchaseOrders = 0;
+  purchaseOrders.forEach(function (x) { if (['DRAFT', 'ORDERED', 'PARTIAL'].indexOf(String(x.status || '').toUpperCase()) >= 0) openPurchaseOrders++; });
+
   return {
     user: sanitizeSessionUser_(user),
-    summary: {
-      products: activeProducts,
-      categories: categories.length,
-      suppliers: suppliers.length,
-      users: users.length
-    }
+    summary: { products: activeProducts, categories: categories.length, suppliers: suppliers.length, users: users.length },
+    usage30Days: usage30Days,
+    topUsedProducts: topUsedProducts,
+    alerts: { lowStock: lowStock, pendingRequests: pendingRequests, openPurchaseOrders: openPurchaseOrders, totalOut30Days: totalOut30 }
   };
 }
 
@@ -1779,11 +1819,12 @@ function listMovementsFinal_(data) {
   var rows=getRowsAsObjects_(getSheet_(SHEETS.STOCK_MOVEMENTS));
   var items=[];
   rows.forEach(function(row){
-    var d=String(row.movementDate||'').slice(0,10);
-    if(from&&d<from)return;if(to&&d>to)return;if(sku&&String(row.sku||'').toLowerCase().indexOf(sku)<0)return;if(name&&String(row.productName||'').toLowerCase().indexOf(name)<0)return;if(type&&String(row.type||'').toUpperCase()!==type)return;
+    var d=dateOnlyFinal_(row.movementDate);
+    if(from&&d&&d<from)return;if(to&&d&&d>to)return;if(from&&!d)return;if(to&&!d)return;
+    if(sku&&String(row.sku||'').toLowerCase().indexOf(sku)<0)return;if(name&&String(row.productName||'').toLowerCase().indexOf(name)<0)return;if(type&&String(row.type||'').toUpperCase()!==type)return;
     items.push(sanitizeMovementFinal_(row));
   });
-  items.sort(function(a,b){return String(b.createdAt).localeCompare(String(a.createdAt));});
+  items.sort(function(a,c){return String(c.createdAt).localeCompare(String(a.createdAt));});
   return {items:items};
 }
 
@@ -2117,10 +2158,36 @@ function bulkUpsertProductsFinal_(data,user){
   requireAdminFinal_(user);return lockRun_(function(){var rows=Array.isArray(data.rows)?data.rows:[];if(!rows.length)throw createApiError_('VALIDATION_ERROR','Data import kosong.',400);var ps=getSheet_(SHEETS.PRODUCTS),products=getRowsAsObjects_(ps),cats=getRowsAsObjects_(getSheet_(SHEETS.CATEGORIES)),sups=getRowsAsObjects_(getSheet_(SHEETS.SUPPLIERS)),bySku={},byBarcode={},cn={},sk={},seenSku={},seenBarcode={},created=0,updated=0,errors=[];products.forEach(function(x){bySku[String(x.sku||'').toLowerCase()]=x;byBarcode[String(x.barcode||'').toLowerCase()]=x});cats.forEach(function(x){cn[String(x.categoryName||'').toLowerCase()]=x});sups.forEach(function(x){sk[String(x.name||'').toLowerCase()]=x;sk[String(x.code||'').toLowerCase()]=x});rows.forEach(function(raw,index){try{var sku=String(firstValueFinal_(raw,['SKU','sku'])||'').trim().toUpperCase(),barcode=String(firstValueFinal_(raw,['Barcode','barcode'])||'').trim(),name=String(firstValueFinal_(raw,['Nama Barang','name','Name'])||'').trim(),cat=String(firstValueFinal_(raw,['Kategori','category','categoryName'])||'').trim().toLowerCase(),unit=String(firstValueFinal_(raw,['Satuan','unit'])||'').trim(),min=Number(firstValueFinal_(raw,['Min','min','minStock'])),max=Number(firstValueFinal_(raw,['Max','max','maxStock'])),price=Number(firstValueFinal_(raw,['Harga','price','Price'])),supplier=String(firstValueFinal_(raw,['Supplier','supplier','supplierName','supplierCode'])||'').trim().toLowerCase(),loc=String(firstValueFinal_(raw,['Lokasi','location'])||'').trim();if(!sku||!barcode||!name||!unit||!isFinite(min)||min<0||!isFinite(max)||max<=min||!isFinite(price)||price<0||!loc)throw new Error('Data wajib/Min-Max/Harga tidak valid.');if(seenSku[sku.toLowerCase()])throw new Error('SKU duplicate di file.');if(seenBarcode[barcode.toLowerCase()])throw new Error('Barcode duplicate di file.');seenSku[sku.toLowerCase()]=1;seenBarcode[barcode.toLowerCase()]=1;var c=cn[cat],s=sk[supplier];if(!c||!toBoolean_(c.active))throw new Error('Kategori tidak ditemukan/tidak aktif.');if(!s||!toBoolean_(s.active))throw new Error('Supplier tidak ditemukan/tidak aktif.');var a=bySku[sku.toLowerCase()]||null,b=byBarcode[barcode.toLowerCase()]||null;if(a&&b&&String(a.productId)!==String(b.productId))throw new Error('SKU dan Barcode menunjuk ke barang berbeda.');var ex=a||b,now=nowIso_();if(ex){var r=findRowById_(ps,'productId',String(ex.productId));setFieldFinal_(ps,r,'sku',sku);setFieldFinal_(ps,r,'barcode',barcode);setFieldFinal_(ps,r,'name',name);setFieldFinal_(ps,r,'categoryId',String(c.categoryId));setFieldFinal_(ps,r,'unit',unit);setFieldFinal_(ps,r,'minStock',min);setFieldFinal_(ps,r,'maxStock',max);setFieldFinal_(ps,r,'price',price);setFieldFinal_(ps,r,'supplierId',String(s.supplierId));setFieldFinal_(ps,r,'location',loc);setFieldFinal_(ps,r,'updatedAt',now);updated++;}else{var n={productId:Utilities.getUuid(),sku:sku,barcode:barcode,name:name,categoryId:String(c.categoryId),unit:unit,minStock:min,maxStock:max,currentStock:0,price:price,supplierId:String(s.supplierId),location:loc,active:true,createdAt:now,updatedAt:now};appendObjectRow_(ps,HEADERS[SHEETS.PRODUCTS],n);created++;}}catch(e){errors.push({row:index+2,message:String(e.message||'Invalid row')});}});return {totalRows:rows.length,created:created,updated:updated,errors:errors};});
 }
 
+function dateOnlyFinal_(value){
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, DATABASE_TIMEZONE, 'yyyy-MM-dd');
+  }
+  var s=String(value===undefined||value===null?'':value).trim();
+  if(!s)return'';
+  var m=s.match(/^(\d{4})[-\/]([01]?\d)[-\/]([0-3]?\d)/);
+  if(m){return m[1]+'-'+('0'+Number(m[2])).slice(-2)+'-'+('0'+Number(m[3])).slice(-2);}
+  var dmy=s.match(/^([0-3]?\d)[\/-]([01]?\d)[\/-](\d{4})/);
+  if(dmy){return dmy[3]+'-'+('0'+Number(dmy[2])).slice(-2)+'-'+('0'+Number(dmy[1])).slice(-2);}
+  var dt=new Date(s);
+  if(!isNaN(dt.getTime()))return Utilities.formatDate(dt,DATABASE_TIMEZONE,'yyyy-MM-dd');
+  return s.slice(0,10);
+}
+function getRecentRowsAsObjectsFinal_(sheet, maxRows){
+  var lastRow=sheet.getLastRow(),lastColumn=sheet.getLastColumn();
+  if(lastRow<2||lastColumn<1)return[];
+  var count=Math.min(maxRows||1000,lastRow-1),start=lastRow-count+1;
+  var headers=sheet.getRange(1,1,1,lastColumn).getValues()[0],values=sheet.getRange(start,1,count,lastColumn).getValues(),result=[];
+  for(var r=0;r<values.length;r++){
+    var row={},hasValue=false;
+    for(var c=0;c<headers.length;c++){row[String(headers[c])]=values[r][c];if(values[r][c]!==''&&values[r][c]!==null)hasValue=true;}
+    if(hasValue)result.push(row);
+  }
+  return result;
+}
 function normalizeDateFinal_(value){var t=String(value||'').trim();if(!t)t=Utilities.formatDate(new Date(),DATABASE_TIMEZONE,'yyyy-MM-dd');if(!/^\d{4}-\d{2}-\d{2}$/.test(t))throw createApiError_('VALIDATION_ERROR','Tanggal harus YYYY-MM-DD.',400);return t;}
 function normalizeDateOptionalFinal_(value){if(value===undefined||value===null||value==='')return'';return normalizeDateFinal_(value)}
 function firstValueFinal_(o,keys){for(var i=0;i<keys.length;i++){if(o[keys[i]]!==undefined&&o[keys[i]]!==null&&o[keys[i]]!=='')return o[keys[i]];}return'';}
-function sanitizeMovementFinal_(x){return {movementId:String(x.movementId||''),movementDate:String(x.movementDate||''),productId:String(x.productId||''),sku:String(x.sku||''),productName:String(x.productName||''),type:String(x.type||''),qty:Number(x.qty||0),stockBefore:Number(x.stockBefore||0),stockAfter:Number(x.stockAfter||0),referenceType:String(x.referenceType||''),referenceId:String(x.referenceId||''),userId:String(x.userId||''),userName:String(x.userName||''),note:String(x.note||''),createdAt:String(x.createdAt||'')};}
+function sanitizeMovementFinal_(x){return {movementId:String(x.movementId||''),movementDate:dateOnlyFinal_(x.movementDate)||String(x.movementDate||''),productId:String(x.productId||''),sku:String(x.sku||''),productName:String(x.productName||''),type:String(x.type||''),qty:Number(x.qty||0),stockBefore:Number(x.stockBefore||0),stockAfter:Number(x.stockAfter||0),referenceType:String(x.referenceType||''),referenceId:String(x.referenceId||''),userId:String(x.userId||''),userName:String(x.userName||''),note:String(x.note||''),createdAt:String(x.createdAt||'')};}
 function sanitizeRequestFinal_(x){return {requestId:String(x.requestId||''),requestNo:String(x.requestNo||''),requestDate:String(x.requestDate||''),staffId:String(x.staffId||''),staffName:String(x.staffName||''),department:String(x.department||''),status:String(x.status||''),rejectionReason:String(x.rejectionReason||''),approvedBy:String(x.approvedBy||''),approvedAt:String(x.approvedAt||''),rejectedBy:String(x.rejectedBy||''),rejectedAt:String(x.rejectedAt||''),createdAt:String(x.createdAt||''),updatedAt:String(x.updatedAt||'')};}
 function sanitizeRequestItemFinal_(x){return {requestItemId:String(x.requestItemId||''),requestId:String(x.requestId||''),productId:String(x.productId||''),sku:String(x.sku||''),productName:String(x.productName||''),unit:String(x.unit||''),qtyRequested:Number(x.qtyRequested||0),qtyApproved:Number(x.qtyApproved||0),stockAtRequest:Number(x.stockAtRequest||0),note:String(x.note||'')};}
 function sanitizePurchaseOrderFinal_(x){return {poId:String(x.poId||''),poNo:String(x.poNo||''),supplierId:String(x.supplierId||''),supplierName:String(x.supplierName||''),orderDate:String(x.orderDate||''),status:String(x.status||''),totalAmount:Number(x.totalAmount||0),createdBy:String(x.createdBy||''),createdAt:String(x.createdAt||''),updatedAt:String(x.updatedAt||'')};}
