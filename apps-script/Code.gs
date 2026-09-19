@@ -40,6 +40,7 @@ var ADMIN_ACTIONS = {
   adjustStock: true,
   approveRequest: true,
   rejectRequest: true,
+  editRejectedRequest: true,
   reorderRecommendations: true,
   createPurchaseOrder: true,
   listPurchaseOrders: true,
@@ -511,6 +512,9 @@ function routeAction_(action, data, user) {
 
     case 'rejectRequest':
       return rejectRequestFinal_(data, user);
+
+    case 'editRejectedRequest':
+      return editRejectedRequestFinal_(data, user);
 
     case 'cancelRequest':
       return cancelRequestFinal_(data, user);
@@ -2108,6 +2112,50 @@ function approveRequestFinal_(data, user) {
 
 function rejectRequestFinal_(data,user){
   requireAdminFinal_(user);return lockRun_(function(){var rid=String(data.requestId||'').trim(),reason=String(data.rejectionReason||'').trim();if(!rid||!reason)throw createApiError_('VALIDATION_ERROR','Request dan alasan reject wajib.',400);var s=getSheet_(SHEETS.REQUESTS),r=findRowById_(s,'requestId',rid);if(r<0)throw createApiError_('NOT_FOUND','Pengajuan tidak ditemukan.',404);var cur=getObjectByRow_(s,r);if(cur.status!=='MENUNGGU')throw createApiError_('VALIDATION_ERROR','Pengajuan sudah diproses.',400);var now=nowIso_();setFieldFinal_(s,r,'status','DITOLAK');setFieldFinal_(s,r,'rejectionReason',reason);setFieldFinal_(s,r,'rejectedBy',String(user.name||user.username));setFieldFinal_(s,r,'rejectedAt',now);setFieldFinal_(s,r,'updatedAt',now);return {request:sanitizeRequestFinal_(getObjectByRow_(s,r))};});
+}
+
+function editRejectedRequestFinal_(data,user){
+  var role=String(user&&user.role||'').toUpperCase();
+  if(role!=='ADMIN'&&role!=='STAFF')throw createApiError_('FORBIDDEN','Mode Staff atau Admin diperlukan.',403);
+  return lockRun_(function(){
+    var rid=String(data.requestId||'').trim(),items=Array.isArray(data.items)?data.items:[],date=String(data.requestDate||'').trim();
+    if(!rid||!date||!items.length)throw createApiError_('VALIDATION_ERROR','Request, tanggal, dan minimal satu item wajib diisi.',400);
+    var rs=getSheet_(SHEETS.REQUESTS),is=getSheet_(SHEETS.REQUEST_ITEMS),ps=getSheet_(SHEETS.PRODUCTS);
+    var rr=findRowById_(rs,'requestId',rid);
+    if(rr<0)throw createApiError_('NOT_FOUND','Pengajuan tidak ditemukan.',404);
+    var req=getObjectByRow_(rs,rr);
+    if(String(req.status||'')!=='DITOLAK')throw createApiError_('VALIDATION_ERROR','Hanya pengajuan yang DITOLAK yang dapat diedit.',400);
+    if(role==='STAFF'&&!samePublicStaffIdentityFinal_(req,user))throw createApiError_('FORBIDDEN','Bukan pengajuan milik Anda.',403);
+
+    var products=getRowsAsObjects_(ps),seen={},out=[];
+    items.forEach(function(it){
+      var pid=String(it.productId||'').trim(),qty=Number(it.qtyRequested);
+      if(!pid||!isFinite(qty)||qty<=0)throw createApiError_('VALIDATION_ERROR','Item pengajuan tidak valid.',400);
+      if(seen[pid])throw createApiError_('VALIDATION_ERROR','Produk yang sama tidak boleh dua kali.',400);
+      seen[pid]=1;
+      var prod=products.find(function(x){return String(x.productId)===pid;});
+      if(!prod)throw createApiError_('NOT_FOUND','Barang pengajuan tidak ditemukan.',404);
+      if(!toBoolean_(prod.active))throw createApiError_('VALIDATION_ERROR','Barang tidak aktif: '+String(prod.name||''),400);
+      out.push({requestItemId:Utilities.getUuid(),requestId:rid,productId:pid,sku:String(prod.sku||''),productName:String(prod.name||''),unit:String(prod.unit||''),qtyRequested:qty,qtyApproved:0,stockAtRequest:toNumber_(prod.currentStock),note:String(it.note||'')});
+    });
+
+    var existing=getRowsAsObjects_(is),rows=[];
+    for(var i=0;i<existing.length;i++)if(String(existing[i].requestId)===rid)rows.push(i+2);
+    rows.sort(function(a,b){return b-a;});
+    var now=nowIso_();
+    // Rebuild only this request's item rows. No stock is changed by an edit.
+    rows.forEach(function(rowNum){is.deleteRow(rowNum);});
+    appendRowsFinal_(is,HEADERS[SHEETS.REQUEST_ITEMS],out);
+    setFieldFinal_(rs,rr,'requestDate',normalizeDateFinal_(date));
+    setFieldFinal_(rs,rr,'status','MENUNGGU');
+    setFieldFinal_(rs,rr,'rejectionReason','');
+    setFieldFinal_(rs,rr,'rejectedBy','');
+    setFieldFinal_(rs,rr,'rejectedAt','');
+    setFieldFinal_(rs,rr,'approvedBy','');
+    setFieldFinal_(rs,rr,'approvedAt','');
+    setFieldFinal_(rs,rr,'updatedAt',now);
+    return {request:sanitizeRequestFinal_(getObjectByRow_(rs,rr)),items:out};
+  });
 }
 
 function cancelRequestFinal_(data,user){
