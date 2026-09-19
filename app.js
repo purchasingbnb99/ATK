@@ -1741,7 +1741,7 @@
       (printOnly?'<div class="request-toolbar no-print"><label class="select-all"><input id="frSelectAll" type="checkbox"><span>Pilih semua yang tampil</span></label></div>':'');
     var head=printOnly?'<th class="no-print">✓</th>':'';
     content.innerHTML=pageHeaderBlock(title,desc,actionHtml)+filterHtml+
-      '<div class="panel"><div class="table-wrap" id="requestPrintArea"><table class="data-table"><thead><tr>'+head+'<th>No</th><th>Tanggal / Jam</th><th>Staff</th><th>Dept</th><th>Items</th><th>Status</th><th class="no-print">Aksi</th></tr></thead><tbody id="frReqBody">'+requestRowsFinal('', '', printOnly)+'</tbody></table></div></div>'+
+      '<div class="panel"><div class="table-wrap" id="requestPrintArea"><table class="data-table"><thead><tr>'+head+'<th>No</th><th>Tanggal / Jam</th><th>Staff</th><th>Dept</th><th>Items</th><th>Status</th>'+(admin?'<th>Keterangan Tolak</th>':'')+'<th class="no-print">Aksi</th></tr></thead><tbody id="frReqBody">'+requestRowsFinal('', '', printOnly)+'</tbody></table></div></div>'+
       (printOnly?'<div id="frSelectedPrintArea" class="selected-print-area" aria-hidden="true"></div>':'');
     if(!printOnly){
       onFinal('frNewReq','click',function(){state.activePage='createRequest';renderPage('createRequest');});
@@ -1771,7 +1771,7 @@
       var hay=[r.requestNo,r.staffName,r.department,r.status,r.requestDate,r.createdAt].concat((x.items||[]).map(function(i){return i.productName+' '+i.sku;})).join(' ').toLowerCase();
       return hay.indexOf(q)>=0;
     });
-    if(!filtered.length)return emptyRowFinal(printOnly?8:7,'Tidak ada pengajuan yang sesuai.');
+    if(!filtered.length)return emptyRowFinal(printOnly?8:8,'Tidak ada pengajuan yang sesuai.');
     return filtered.map(function(x){
       var r=x.request||{},stamp=r.createdAt||r.requestDate;
       var check=printOnly?'<td class="no-print"><input class="frSelect" type="checkbox" data-id="'+escFinal(r.requestId)+'" aria-label="Pilih '+escFinal(r.requestNo)+'"></td>':'';
@@ -1787,7 +1787,8 @@
       var productNames=(x.items||[]).map(function(i){return i.productName;}).filter(Boolean);
       var productSummary=productNames.length?productNames.slice(0,2).join(', ')+(productNames.length>2?' +'+(productNames.length-2)+' barang':''):'';
       var dateCell=escFinal(formatRequestDateTimeFinal(stamp))+(productSummary?'<div class="muted-cell request-product-summary">Barang: '+escFinal(productSummary)+'</div>':'');
-      return '<tr>'+check+'<td><strong>'+escFinal(r.requestNo)+'</strong></td><td>'+dateCell+'</td><td>'+escFinal(r.staffName)+'</td><td>'+escFinal(r.department||'-')+'</td><td>'+fmtFinal((x.items||[]).length)+'</td><td>'+statusFinal(r.status)+'</td><td class="no-print"><div class="action-group">'+action+'</div></td></tr>';
+      var rejectCell=admin?'<td class="request-reject-reason">'+(String(r.status||'').toUpperCase()==='DITOLAK'&&r.rejectionReason?'<span>Alasan: '+escFinal(r.rejectionReason)+'</span>':'<span class="muted-cell">-</span>')+'</td>':'';
+      return '<tr>'+check+'<td><strong>'+escFinal(r.requestNo)+'</strong></td><td>'+dateCell+'</td><td>'+escFinal(r.staffName)+'</td><td>'+escFinal(r.department||'-')+'</td><td>'+fmtFinal((x.items||[]).length)+'</td><td>'+statusFinal(r.status)+'</td>'+rejectCell+'<td class="no-print"><div class="action-group">'+action+'</div></td></tr>';
     }).join('');
   }
 
