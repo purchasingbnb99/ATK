@@ -1,1 +1,1 @@
-ATK Inventory - Scanner Staff V2.7
+V2.8 - Scanner Camera Status UX Fix

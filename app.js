@@ -1218,6 +1218,7 @@
     });
     document.getElementById('startProductScanner').addEventListener('click', startProductScanner);
     document.getElementById('stopProductScanner').addEventListener('click', stopProductScanner);
+    setScannerUiStateFinal('startProductScanner','stopProductScanner','productScannerMessage',false,'Kamera nonaktif.');
 
     document.getElementById('productForm').addEventListener('submit', async function (event) {
       event.preventDefault();
@@ -1324,6 +1325,19 @@
     throw lastError || new Error('Kamera gagal dibuka.');
   }
 
+  function setScannerUiStateFinal(startId, stopId, messageId, isActive, messageText) {
+    var startBtn = document.getElementById(startId);
+    var stopBtn = document.getElementById(stopId);
+    var msg = document.getElementById(messageId);
+    if (startBtn) startBtn.disabled = !!isActive;
+    if (stopBtn) stopBtn.disabled = !isActive;
+    if (msg && messageText) {
+      msg.className = 'form-message ' + (isActive ? 'success' : 'info');
+      msg.textContent = messageText;
+      msg.classList.remove('hidden');
+    }
+  }
+
   async function startProductScanner() {
     try { await ensureScannerLibraryFinal(); } catch (loadErr) {
       showGlobalMessage('Scanner tidak tersedia. Gunakan input barcode manual.', 'warning');
@@ -1351,22 +1365,28 @@
         function () {},
         { width: 280, height: 120 }
       );
-      message.className = 'form-message success';
-      message.textContent = 'Kamera aktif. Arahkan kamera ke barcode barang.';
-      message.classList.remove('hidden');
+      setScannerUiStateFinal('startProductScanner', 'stopProductScanner', 'productScannerMessage', true, 'Kamera aktif. Arahkan kamera ke barcode barang.');
     } catch (err) {
       state.productScanner = null;
-      message.className = 'form-message error';
-      message.textContent = friendlyCameraErrorFinal(err);
-      message.classList.remove('hidden');
+      if (message) {
+        message.className = 'form-message error';
+        message.textContent = friendlyCameraErrorFinal(err);
+        message.classList.remove('hidden');
+      }
+      var psStart = document.getElementById('startProductScanner');
+      var psStop = document.getElementById('stopProductScanner');
+      if (psStart) psStart.disabled = false;
+      if (psStop) psStop.disabled = true;
     }
   }
 
   async function stopProductScanner() {
-    if (!state.productScanner) return;
-    try { await state.productScanner.stop(); } catch (err) {}
-    try { state.productScanner.clear(); } catch (err2) {}
-    state.productScanner = null;
+    if (state.productScanner) {
+      try { await state.productScanner.stop(); } catch (err) {}
+      try { state.productScanner.clear(); } catch (err2) {}
+      state.productScanner = null;
+    }
+    setScannerUiStateFinal('startProductScanner', 'stopProductScanner', 'productScannerMessage', false, 'Kamera nonaktif.');
   }
 
   async function renderUsers(content) {
@@ -1638,6 +1658,7 @@
     onFinal('frScanButton','click',function(){var p=byIdFinal('frScannerPanel');if(p)p.classList.remove('hidden');startReceiveScanner();});
     onFinal('frStartScanner','click',startReceiveScanner);
     onFinal('frStopScanner','click',stopReceiveScanner);
+    setScannerUiStateFinal('frStartScanner','frStopScanner','frScannerMsg',false,'Kamera nonaktif.');
     onFinal('finalReceiveForm','submit',async function(e){
       e.preventDefault();var btn=this.querySelector('button[type="submit"]'),box=byIdFinal('frMsg');setBtnFinal(btn,true,'Menyimpan...');
       try{await apiFinal('receiveStock',{productId:valFinal('frProduct'),supplierId:valFinal('frSupplier'),qty:valFinal('frQty'),documentNo:valFinal('frDoc'),receiptDate:valFinal('frDate'),note:valFinal('frNote')});
@@ -1655,7 +1676,7 @@
         var code=String(decodedText||'').trim();if(!code)return;
         await stopReceiveScanner();await lookupReceiveBarcode(code);
       },function(){},{width:280,height:120});
-      messageFinal(msg,'Kamera aktif. Arahkan ke barcode barang.','success');
+      setScannerUiStateFinal('frStartScanner', 'frStopScanner', 'frScannerMsg', true, 'Kamera aktif. Arahkan ke barcode barang.');
     }catch(err){state.receiveScanner=null;messageFinal(msg,friendlyCameraErrorFinal(err),'error');}
   }
 
@@ -1672,10 +1693,8 @@
   }
 
   async function stopReceiveScanner(){
-    if(!state.receiveScanner)return;
-    try{await state.receiveScanner.stop();}catch(err){}
-    try{state.receiveScanner.clear();}catch(err2){}
-    state.receiveScanner=null;
+    if(state.receiveScanner){try{await state.receiveScanner.stop();}catch(err){}try{state.receiveScanner.clear();}catch(err2){}state.receiveScanner=null;}
+    setScannerUiStateFinal('frStartScanner','frStopScanner','frScannerMsg',false,'Kamera nonaktif.');
   }
 
   async function renderFinalAdjustment(content){
@@ -1896,7 +1915,7 @@
     var sup=activeSupplierOptions();
     openModalFinal('Buat Purchase Order','<form id="finalPOForm"><div class="form-grid"><div class="form-group"><label>Supplier</label><select id="fpoSupplier" class="field" required><option value="">Pilih</option>'+sup+'</select></div>'+fieldDateFinal('fpoDate','Tanggal Order')+'</div><div class="po-scan-toolbar"><button type="button" class="btn btn-secondary" id="fpoScanButton">▦ Scan Barcode Barang</button><button type="button" class="btn btn-ghost" id="fpoStartScanner">Mulai Kamera</button><button type="button" class="btn btn-ghost" id="fpoStopScanner">Stop</button></div><div id="fpoScannerPanel" class="inline-scanner hidden"><div id="fpoScannerArea" class="scanner-stage compact"></div><div id="fpoScannerMsg" class="form-message hidden"></div></div><div id="fpoItems"></div><button type="button" class="btn btn-secondary" id="addFPOItem">+ Item</button><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="finalPOForm">Buat PO</button>');
     if(prefill){byIdFinal('fpoSupplier').value=prefill.supplierId||'';addFPOItem(prefill);}else addFPOItem();
-    onFinal('addFPOItem','click',function(){addFPOItem();});onFinal('fpoScanButton','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});onFinal('fpoStartScanner','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});onFinal('fpoStopScanner','click',stopPOScanner);
+    onFinal('addFPOItem','click',function(){addFPOItem();});onFinal('fpoScanButton','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});onFinal('fpoStartScanner','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});onFinal('fpoStopScanner','click',stopPOScanner);setScannerUiStateFinal('fpoStartScanner','fpoStopScanner','fpoScannerMsg',false,'Kamera nonaktif.');
     byIdFinal('finalPOForm').onsubmit=async function(e){e.preventDefault();var its=[];document.querySelectorAll('.fpo-row').forEach(function(r){its.push({productId:r.querySelector('.fpo-product').value,qtyOrdered:r.querySelector('.fpo-qty').value,price:r.querySelector('.fpo-price').value});});var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-primary');setBtnFinal(b,true,'Menyimpan...');try{await apiFinal('createPurchaseOrder',{supplierId:valFinal('fpoSupplier'),orderDate:valFinal('fpoDate'),items:its});closeModalFinal();showGlobalMessage('PO berhasil dibuat.','success');renderPage('listPurchaseOrders');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Buat PO');}};
   }
   function addFPOItem(prefill){var c=byIdFinal('fpoItems'),r=document.createElement('div');r.className='form-grid fpo-row';r.innerHTML='<div class="form-group"><label>Barang</label><select class="field fpo-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fpo-qty','Qty',prefill?prefill.recommendedQty:1)+numberClassFinal('fpo-price','Harga',prefill?prefill.price:0)+'<div class="form-group" style="display:flex;align-items:end"><button type="button" class="btn btn-danger fpo-remove">Hapus</button></div>';c.appendChild(r);if(prefill)r.querySelector('.fpo-product').value=prefill.productId;r.querySelector('.fpo-remove').onclick=function(){r.remove();};}
@@ -1909,11 +1928,11 @@
         var code=String(txt||'').trim();if(!code)return;
         await stopPOScanner();await lookupPOBarcode(code);
       },function(){},{width:280,height:120});
-      messageFinal(msg,'Kamera aktif. Arahkan ke barcode barang.','success');
-    }catch(err){state.poScanner=null;messageFinal(msg,friendlyCameraErrorFinal(err),'error');}
+      setScannerUiStateFinal('fpoStartScanner', 'fpoStopScanner', 'fpoScannerMsg', true, 'Kamera aktif. Arahkan ke barcode barang.');
+    }catch(err){state.poScanner=null;messageFinal(msg,friendlyCameraErrorFinal(err),'error');setScannerUiStateFinal('fpoStartScanner','fpoStopScanner','fpoScannerMsg',false,null);}
   }
 
-  async function stopPOScanner(){if(!state.poScanner)return;try{await state.poScanner.stop();}catch(err){}try{state.poScanner.clear();}catch(err2){}state.poScanner=null;}
+  async function stopPOScanner(){if(state.poScanner){try{await state.poScanner.stop();}catch(err){}try{state.poScanner.clear();}catch(err2){}state.poScanner=null;}setScannerUiStateFinal('fpoStartScanner','fpoStopScanner','fpoScannerMsg',false,'Kamera nonaktif.');}
   async function lookupPOBarcode(code){var clean=String(code||'').trim();if(!clean)return;try{var r=await apiFinal('searchProducts',{barcode:clean});var p=(r.data.items||[])[0];if(!p){messageFinal(byIdFinal('fpoScannerMsg'),'Barcode '+clean+' belum terdaftar di Master Barang. Tambahkan terlebih dahulu dari Master Barang.','warning');return;}var existing=null;document.querySelectorAll('.fpo-row').forEach(function(row){var select=row.querySelector('.fpo-product');if(select&&String(select.value)===String(p.productId))existing=row;});if(existing){var qty=existing.querySelector('.fpo-qty');qty.value=Number(qty.value||0)+1;}else{addFPOItem({productId:p.productId,recommendedQty:1,price:p.price||0,supplierId:p.supplierId||''});}var supplier=byIdFinal('fpoSupplier');if(supplier&&!supplier.value&&p.supplierId)supplier.value=String(p.supplierId);messageFinal(byIdFinal('fpoScannerMsg'),'Barang ditemukan: '+p.sku+' — '+p.name+'. '+(existing?'Qty ditambah 1.':'Item ditambahkan ke PO.'),'success');}catch(err){messageFinal(byIdFinal('fpoScannerMsg'),friendlyFinal(err),'error');}}
 
   function openPOViewFinal(x){if(!x)return;openModalFinal('Detail '+x.purchaseOrder.poNo,'<div class="kpi-row"><div class="kpi">Supplier<strong>'+escFinal(x.purchaseOrder.supplierName)+'</strong></div><div class="kpi">Status<strong>'+escFinal(x.purchaseOrder.status)+'</strong></div><div class="kpi">Total<strong>'+moneyFinal(x.purchaseOrder.totalAmount)+'</strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Order</th><th>Received</th><th>Remaining</th><th>Price</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyOrdered)+'</td><td>'+fmtFinal(i.qtyReceived)+'</td><td>'+fmtFinal(i.qtyRemaining)+'</td><td>'+moneyFinal(i.price)+'</td></tr>';}).join('')+'</tbody></table></div>','<button class="btn btn-secondary" data-close-modal>Tutup</button>');}
@@ -2026,7 +2045,7 @@
       fieldFinal('manualFinalBarcode','Barcode Manual','',100,false)+'<button class="btn btn-secondary" id="manualFinalSearch">Cari</button><div id="scannerFinalMsg" class="form-message hidden"></div><div id="scannerFinalResult" class="scan-result" style="margin-top:12px">Belum ada hasil.</div><div id="scannerFinalProduct"></div>'+
       (isStaff?'<div id="staffScanCartPanel" class="scan-cart-panel" style="margin-top:14px"></div>':'')+'</div>';
     await stopFinalScanner();await stopProductScanner();renderStaffScanCartFinal();
-    onFinal('startFinalScanner','click',startFinalScanner);onFinal('stopFinalScanner','click',stopFinalScanner);onFinal('manualFinalSearch','click',function(){lookupFinalBarcode(valFinal('manualFinalBarcode'));});
+    onFinal('startFinalScanner','click',startFinalScanner);onFinal('stopFinalScanner','click',stopFinalScanner);onFinal('manualFinalSearch','click',function(){lookupFinalBarcode(valFinal('manualFinalBarcode'));});setScannerUiStateFinal('startFinalScanner','stopFinalScanner','scannerFinalMsg',false,'Kamera nonaktif.');
   }
 
   function renderStaffScanCartFinal(){
@@ -2058,11 +2077,11 @@
     var msg=byIdFinal('scannerFinalMsg');
     try{
       state.finalScanner=await createAndStartScannerFinal('finalScannerArea',function(txt){setTextFinal('scannerFinalResult',txt);lookupFinalBarcode(txt);stopFinalScanner();},function(){},{width:260,height:120});
-      messageFinal(msg,'Kamera aktif.','success');
-    }catch(err){state.finalScanner=null;messageFinal(msg,friendlyCameraErrorFinal(err),'error');}
+      setScannerUiStateFinal('startFinalScanner', 'stopFinalScanner', 'scannerFinalMsg', true, 'Kamera aktif. Arahkan ke barcode barang.');
+    }catch(err){state.finalScanner=null;messageFinal(msg,friendlyCameraErrorFinal(err),'error');setScannerUiStateFinal('startFinalScanner','stopFinalScanner','scannerFinalMsg',false,null);}
   }
 
-  async function stopFinalScanner(){if(!state.finalScanner)return;try{await state.finalScanner.stop();}catch(err){}try{state.finalScanner.clear();}catch(err2){}state.finalScanner=null;}
+  async function stopFinalScanner(){if(state.finalScanner){try{await state.finalScanner.stop();}catch(err){}try{state.finalScanner.clear();}catch(err2){}state.finalScanner=null;}setScannerUiStateFinal('startFinalScanner','stopFinalScanner','scannerFinalMsg',false,'Kamera nonaktif.');}
   async function lookupFinalBarcode(code){var clean=String(code||'').trim();if(!clean){messageFinal(byIdFinal('scannerFinalMsg'),'Barcode belum diisi.','warning');return;}setTextFinal('scannerFinalResult',clean);try{var r=await apiFinal('searchProducts',{barcode:clean});var p=(r.data.items||[])[0];if(p){var isAdmin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';var isStaff=String(state.user&&state.user.role||'').toUpperCase()==='STAFF';
 var editAction=isAdmin?'<button type="button" class="btn btn-primary" id="scannerEditProduct">Edit Barang</button>':'';
 var staffAction=isStaff?'<button type="button" class="btn btn-primary" id="scannerRequestNow">Ajukan Barang Ini</button><button type="button" class="btn btn-secondary" id="scannerAddToRequest">Tambah ke Pengajuan</button>':'';
