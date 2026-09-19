@@ -302,3 +302,10 @@ Versi ini mempertahankan backend dan API yang sudah berfungsi, dengan penyempurn
 
 ### Important deployment note
 Only `app.js`, `styles.css`, and the updated Apps Script `Code.gs` need to change from the previous production package. Keep the existing Vercel Environment Variables and Apps Script API key. After updating `Code.gs`, deploy a new Apps Script Web App version, then redeploy Vercel.
+
+
+## Public Staff Mode (UAT)
+
+Admin tetap menggunakan login username/password. Staff tidak menggunakan password; Staff masuk melalui tombol **Masuk Mode Staff** dan mengisi Nama Staff serta Departemen. Sistem membuat session STAFF sementara, sehingga Staff dapat mencari barang, scan barcode, membuat pengajuan, melihat Pengajuan Saya, dan mencetak pengajuan. Staff tidak dapat mengakses fungsi admin.
+
+Pencarian Barang Staff memuat daftar barang aktif satu kali lalu memfilter langsung di browser setiap ketikan, sehingga input 1 huruf dapat langsung menampilkan hasil tanpa request per karakter.

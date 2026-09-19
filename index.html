@@ -32,7 +32,7 @@
 
         <form id="loginForm" novalidate>
           <div class="form-group">
-            <label for="loginUsername">Username</label>
+            <label for="loginUsername">Username Admin</label>
             <input id="loginUsername" name="username" type="text"
               autocomplete="username" maxlength="80" required>
           </div>
@@ -46,8 +46,35 @@
           <div id="loginError" class="form-message error hidden" role="alert"></div>
 
           <button id="loginButton" class="btn btn-primary btn-full" type="submit">
-            <span class="btn-label">Login</span>
+            <span class="btn-label">Login Admin</span>
             <span class="spinner small hidden" aria-hidden="true"></span>
+          </button>
+        </form>
+
+        <div class="auth-divider"><span>atau</span></div>
+
+        <button id="staffModeButton" type="button" class="staff-entry-card">
+          <span class="staff-entry-icon">＋</span>
+          <span><strong>Masuk Mode Staff</strong><small>Tanpa password · untuk pencarian & pengajuan barang</small></span>
+          <span class="staff-entry-arrow">›</span>
+        </button>
+
+        <form id="staffEntryForm" class="staff-entry-form hidden" novalidate>
+          <div class="staff-entry-head">
+            <div><h3>Mode Staff</h3><p>Tidak menggunakan password. Nama digunakan sebagai identitas pada pengajuan.</p></div>
+            <button id="staffCancelButton" type="button" class="icon-btn" aria-label="Kembali ke Login Admin">×</button>
+          </div>
+          <div class="form-group">
+            <label for="staffNameInput">Nama Staff</label>
+            <input id="staffNameInput" type="text" maxlength="100" autocomplete="name" required>
+          </div>
+          <div class="form-group">
+            <label for="staffDepartmentInput">Departemen</label>
+            <input id="staffDepartmentInput" type="text" maxlength="100" value="General" autocomplete="organization">
+          </div>
+          <div id="staffEntryError" class="form-message error hidden" role="alert"></div>
+          <button id="staffEnterButton" class="btn btn-primary btn-full" type="submit">
+            Masuk ke Mode Staff
           </button>
         </form>
       </div>

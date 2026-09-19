@@ -59,8 +59,7 @@
       { label: 'Scan Barcode', icon: '▦', action: 'barcodeScanner', section: 'barang' },
       { label: 'Buat Pengajuan', icon: '+', action: 'createRequest', section: 'pengajuan' },
       { label: 'Pengajuan Saya', icon: '≡', action: 'myRequests', section: 'pengajuan' },
-      { label: 'Print Pengajuan', icon: '▧', action: 'printRequests', section: 'pengajuan' },
-      { label: 'Change Password', icon: '⚿', action: 'changePassword', section: 'akun' }
+      { label: 'Print Pengajuan', icon: '▧', action: 'printRequests', section: 'pengajuan' }
     ]
   };
 
@@ -89,6 +88,13 @@
     var loginForm = document.getElementById('loginForm');
     if (loginForm) loginForm.addEventListener('submit', handleLoginSubmit);
 
+    var staffModeButton = document.getElementById('staffModeButton');
+    if (staffModeButton) staffModeButton.addEventListener('click', showStaffEntry);
+    var staffCancelButton = document.getElementById('staffCancelButton');
+    if (staffCancelButton) staffCancelButton.addEventListener('click', hideStaffEntry);
+    var staffEntryForm = document.getElementById('staffEntryForm');
+    if (staffEntryForm) staffEntryForm.addEventListener('submit', handleStaffEntrySubmit);
+
     var logoutButton = document.getElementById('logoutButton');
     if (logoutButton) logoutButton.addEventListener('click', handleLogout);
 
@@ -100,6 +106,75 @@
 
     var overlay = document.getElementById('sidebarOverlay');
     if (overlay) overlay.addEventListener('click', closeSidebar);
+  }
+
+  function showStaffEntry() {
+    var adminForm = document.getElementById('loginForm');
+    var staffButton = document.getElementById('staffModeButton');
+    var staffForm = document.getElementById('staffEntryForm');
+    var error = document.getElementById('loginError');
+    if (adminForm) adminForm.classList.add('hidden');
+    if (staffButton) staffButton.classList.add('hidden');
+    if (error) error.classList.add('hidden');
+    if (staffForm) {
+      staffForm.classList.remove('hidden');
+      var name = document.getElementById('staffNameInput');
+      if (name) {
+        name.focus();
+        try { name.value = window.localStorage.getItem('atk_staff_name') || ''; } catch (err) {}
+      }
+    }
+  }
+
+  function hideStaffEntry() {
+    var adminForm = document.getElementById('loginForm');
+    var staffButton = document.getElementById('staffModeButton');
+    var staffForm = document.getElementById('staffEntryForm');
+    var error = document.getElementById('staffEntryError');
+    if (adminForm) adminForm.classList.remove('hidden');
+    if (staffButton) staffButton.classList.remove('hidden');
+    if (staffForm) staffForm.classList.add('hidden');
+    if (error) error.classList.add('hidden');
+  }
+
+  async function handleStaffEntrySubmit(event) {
+    event.preventDefault();
+    var nameInput = document.getElementById('staffNameInput');
+    var departmentInput = document.getElementById('staffDepartmentInput');
+    var button = document.getElementById('staffEnterButton');
+    var errorBox = document.getElementById('staffEntryError');
+    var name = String(nameInput && nameInput.value || '').trim();
+    var department = String(departmentInput && departmentInput.value || '').trim();
+
+    if (errorBox) errorBox.classList.add('hidden');
+    if (!name) {
+      showMessageElement(errorBox, 'Nama Staff wajib diisi.', 'error');
+      return;
+    }
+
+    setButtonLoading(button, true);
+    try {
+      var result = await apiRequest('createStaffSession', {
+        name: name,
+        department: department
+      }, false);
+      if (!result.ok || !result.data || !result.data.sessionToken) {
+        throw { code: 'STAFF_ENTRY_FAILED', message: 'Mode Staff tidak dapat dibuka.', status: 400 };
+      }
+      state.sessionToken = String(result.data.sessionToken);
+      state.expiresAt = String(result.data.expiresAt || '');
+      state.user = result.data.user || null;
+      try {
+        window.localStorage.setItem('atk_staff_name', name);
+        window.localStorage.setItem('atk_staff_department', department);
+      } catch (storageErr) {}
+      persistSession();
+      showMain();
+    } catch (error) {
+      showMessageElement(errorBox, getFriendlyError(error), 'error');
+    } finally {
+      setButtonLoading(button, false);
+    }
   }
 
   async function restoreSession() {
@@ -386,6 +461,7 @@
     hideElement(document.getElementById('loadingScreen'));
     hideElement(document.getElementById('mainView'));
     showElement(document.getElementById('loginView'));
+    hideStaffEntry();
 
     var input = document.getElementById('loginUsername');
     if (input) {
@@ -514,7 +590,7 @@
       } else if (action === 'listUsers') {
         await renderUsers(content);
       } else if (action === 'searchProducts') {
-        renderSearchProducts(content);
+        await renderSearchProducts(content);
       } else if (action === 'receiveStock') {
         await renderFinalReceiveStock(content);
       } else if (action === 'adjustStock') {
@@ -523,6 +599,8 @@
         await renderFinalMovements(content);
       } else if (action === 'listRequests') {
         await renderFinalRequests(content);
+      } else if (action === 'myRequests') {
+        await renderFinalRequests(content, false);
       } else if (action === 'createRequest') {
         await renderFinalCreateRequest(content);
       } else if (action === 'barcodeScanner') {
@@ -569,6 +647,14 @@
     var usage = result.data && result.data.usage30Days ? result.data.usage30Days : [];
     var topUsed = result.data && result.data.topUsedProducts ? result.data.topUsedProducts : [];
     var alerts = result.data && result.data.alerts ? result.data.alerts : {};
+
+    if (state.user && state.user.publicStaff) {
+      content.innerHTML =
+        '<div class="page-heading"><h3>Dashboard Staff</h3><p>Mode Staff tanpa password untuk pencarian dan pengajuan barang.</p></div>' +
+        '<div class="stat-grid">' + statCard('Barang Aktif', number(summary.products || 0)) + statCard('Pengajuan Menunggu', number(alerts.pendingRequests || 0)) + '</div>' +
+        '<div class="panel staff-dashboard-note"><div class="panel-header"><div><h4 class="panel-title">Selamat datang, ' + escapeHtml(String(state.user.name || 'Staff')) + '</h4><p class="panel-copy">Gunakan Cari Barang atau Scan Barcode untuk menemukan barang. Buat Pengajuan untuk mengirim kebutuhan ke Admin.</p></div><span class="dashboard-chip">STAFF</span></div></div>';
+      return;
+    }
 
     var usageMax = Math.max.apply(null, usage.map(function (x) { return Number(x.qty || 0); }).concat([1]));
     var usageHtml = usage.map(function (x) {
@@ -1355,28 +1441,29 @@
     content.innerHTML =
       pageHeaderBlock(
         'Cari Barang',
-        'Tampilkan seluruh barang aktif atau cari berdasarkan SKU, barcode, atau nama barang.',
+        'Pencarian langsung berdasarkan SKU, barcode, atau nama barang.',
         ''
       ) +
       '<div class="panel">' +
       '<div class="search-row">' +
-      '<input id="searchProductInput" class="field" placeholder="Contoh: ATK-001 / 899... / pulpen">' +
-      '<button id="searchProductButton" type="button" class="btn btn-primary">Cari</button>' +
+      '<input id="searchProductInput" class="field" autocomplete="off" placeholder="Ketik 1 huruf, SKU, barcode, atau nama barang...">' +
       '<button id="clearProductSearchButton" type="button" class="btn btn-secondary">Reset</button>' +
       '</div>' +
       '<div id="searchProductMessage" class="form-message hidden" role="alert"></div>' +
+      '<div id="searchProductCount" class="panel-copy" style="margin:8px 0 12px"></div>' +
       '<div class="table-wrap search-result-wrap"><table class="data-table">' +
       '<thead><tr><th>SKU</th><th>Barcode</th><th>Nama</th><th>Unit</th><th>Stok</th><th>Lokasi</th></tr></thead>' +
       '<tbody id="searchProductBody">' + emptyRow(6, 'Memuat barang...') + '</tbody>' +
       '</table></div></div>';
 
     var input = document.getElementById('searchProductInput');
-    var button = document.getElementById('searchProductButton');
     var resetButton = document.getElementById('clearProductSearchButton');
     var body = document.getElementById('searchProductBody');
     var message = document.getElementById('searchProductMessage');
+    var count = document.getElementById('searchProductCount');
 
     function renderProductRows(items) {
+      if (count) count.textContent = items.length + ' barang ditemukan';
       if (!items.length) {
         body.innerHTML = emptyRow(6, 'Barang tidak ditemukan.');
         return;
@@ -1393,60 +1480,40 @@
       }).join('');
     }
 
-    async function loadAllProducts() {
-      button.disabled = true;
-      resetButton.disabled = true;
-      message.className = 'form-message hidden';
-      try {
-        var result = await apiRequest('listProducts', { includeInactive: false });
-        var items = result.data && result.data.items ? result.data.items : [];
-        state.caches.products = items;
+    function filterLocal(query) {
+      var search = String(query || '').trim().toLowerCase();
+      var items = state.caches.products || [];
+      if (!search) {
         renderProductRows(items);
-      } catch (error) {
-        body.innerHTML = emptyRow(6, 'Gagal memuat data barang.');
-        message.className = 'form-message error';
-        message.textContent = getFriendlyError(error);
-        message.classList.remove('hidden');
-      } finally {
-        button.disabled = false;
-        resetButton.disabled = false;
-      }
-    }
-
-    async function doSearch() {
-      var query = input.value.trim();
-      if (!query) {
-        renderProductRows(state.caches.products || []);
         return;
       }
-
-      button.disabled = true;
-      message.className = 'form-message hidden';
-      try {
-        var result = await apiRequest('searchProducts', { query: query });
-        var items = result.data && result.data.items ? result.data.items : [];
-        renderProductRows(items);
-      } catch (error) {
-        body.innerHTML = emptyRow(6, 'Pencarian gagal.');
-        message.className = 'form-message error';
-        message.textContent = getFriendlyError(error);
-        message.classList.remove('hidden');
-      } finally {
-        button.disabled = false;
-      }
+      var filtered = items.filter(function (item) {
+        return [item.sku, item.barcode, item.name].join(' ').toLowerCase().indexOf(search) >= 0;
+      });
+      renderProductRows(filtered);
     }
 
+    try {
+      message.className = 'form-message hidden';
+      var result = await apiRequest('listProducts', { includeInactive: false });
+      state.caches.products = result.data && result.data.items ? result.data.items : [];
+      renderProductRows(state.caches.products);
+    } catch (error) {
+      body.innerHTML = emptyRow(6, 'Gagal memuat data barang.');
+      message.className = 'form-message error';
+      message.textContent = getFriendlyError(error);
+      message.classList.remove('hidden');
+      if (count) count.textContent = '';
+      return;
+    }
+
+    input.addEventListener('input', function () { filterLocal(input.value); });
     resetButton.addEventListener('click', function () {
       input.value = '';
       message.className = 'form-message hidden';
-      renderProductRows(state.caches.products || []);
+      filterLocal('');
+      input.focus();
     });
-    button.addEventListener('click', doSearch);
-    input.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') doSearch();
-    });
-
-    await loadAllProducts();
   }
 
   function renderChangePassword(content) {
@@ -1592,7 +1659,17 @@
   function openApproveFinal(x){var body='<form id="faReqForm"><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Request</th><th>Stok Saat Request</th><th>Qty Approved</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td><input class="field final-approve-qty" data-id="'+escFinal(i.requestItemId)+'" type="number" min="0" max="'+i.qtyRequested+'" step="1" value="'+i.qtyRequested+'"></td></tr>';}).join('')+'</tbody></table></div><div id="modalMessage" class="form-message hidden"></div></form>';openModalFinal('Approve '+x.request.requestNo,body,'<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="faReqForm">Approve</button>');byIdFinal('faReqForm').onsubmit=async function(e){e.preventDefault();var items=[];document.querySelectorAll('.final-approve-qty').forEach(function(i){items.push({requestItemId:i.dataset.id,qtyApproved:Number(i.value)});});var b=document.querySelector('#modalFooter .btn-primary'),m=byIdFinal('modalMessage');setBtnFinal(b,true,'Memproses...');try{await apiFinal('approveRequest',{requestId:x.request.requestId,items:items});closeModalFinal();showGlobalMessage('Pengajuan berhasil diproses.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Approve');}};}
   function openRejectFinal(x){openModalFinal('Reject '+x.request.requestNo,'<form id="frRejectForm"><div class="form-group"><label>Alasan Reject</label><textarea id="frRejectReason" class="field" maxlength="500" required></textarea></div><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-danger" type="submit" form="frRejectForm">Reject</button>');byIdFinal('frRejectForm').onsubmit=async function(e){e.preventDefault();var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-danger');setBtnFinal(b,true,'Memproses...');try{await apiFinal('rejectRequest',{requestId:x.request.requestId,rejectionReason:valFinal('frRejectReason')});closeModalFinal();showGlobalMessage('Pengajuan ditolak.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Reject');}};}
 
-  async function renderFinalCreateRequest(content){await ensureMasterCaches();content.innerHTML=pageHeaderBlock('Buat Pengajuan','Pengajuan tidak mengurangi stok sampai Admin melakukan approval.','')+'<div class="panel"><div id="finalReqItems"></div><button class="btn btn-secondary" id="addFinalReqItem">+ Barang</button><form id="finalCreateReqForm" style="margin-top:16px"><div class="form-grid">'+fieldDateFinal('fcrDate','Tanggal')+'</div>'+fieldFinal('fcrNote','Catatan Umum','',500,false)+'<div id="fcrMsg" class="form-message hidden"></div><button class="btn btn-primary">Kirim Pengajuan</button></form></div>';addFinalReqRow();onFinal('addFinalReqItem','click',addFinalReqRow);onFinal('finalCreateReqForm','submit',async function(e){e.preventDefault();var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});var m=byIdFinal('fcrMsg');try{await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});showGlobalMessage('Pengajuan berhasil dibuat.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}});}
+  async function renderFinalCreateRequest(content){
+    await ensureMasterCaches();
+    var staffName=String(state.user&&state.user.name||'').trim();
+    var department=String(state.user&&state.user.department||'').trim();
+    content.innerHTML=pageHeaderBlock('Buat Pengajuan','Pengajuan tidak mengurangi stok sampai Admin melakukan approval.','')+'<div class="panel">'+
+      '<div class="form-grid"><div class="form-group"><label>Nama Staff</label><input class="field" value="'+escFinal(staffName)+'" readonly></div><div class="form-group"><label>Departemen</label><input class="field" value="'+escFinal(department||'General')+'" readonly></div></div>'+
+      '<div id="finalReqItems"></div><button class="btn btn-secondary" id="addFinalReqItem">+ Barang</button><form id="finalCreateReqForm" style="margin-top:16px"><div class="form-grid">'+fieldDateFinal('fcrDate','Tanggal')+'</div>'+fieldFinal('fcrNote','Catatan Umum','',500,false)+'<div id="fcrMsg" class="form-message hidden"></div><button class="btn btn-primary">Kirim Pengajuan</button></form></div>';
+    addFinalReqRow();
+    onFinal('addFinalReqItem','click',addFinalReqRow);
+    onFinal('finalCreateReqForm','submit',async function(e){e.preventDefault();var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});var m=byIdFinal('fcrMsg');if(!rows.length){messageFinal(m,'Minimal satu barang harus dipilih.','error');return;}try{await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});showGlobalMessage('Pengajuan berhasil dibuat.','success');renderPage('myRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}});
+  }
   function addFinalReqRow(){var c=byIdFinal('finalReqItems'),r=document.createElement('div');r.className='form-grid fcr-row';r.innerHTML='<div class="form-group"><label>Barang</label><select class="field fcr-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fcr-qty','Qty',1)+'<div class="form-group"><label>Catatan</label><input class="field fcr-note" maxlength="300"></div><div class="form-group" style="display:flex;align-items:end"><button type="button" class="btn btn-danger fcr-remove">Hapus</button></div>';c.appendChild(r);r.querySelector('.fcr-remove').onclick=function(){r.remove();};}
 
   async function renderFinalReorder(content){var r=await apiFinal('reorderRecommendations',{});state.reorderFinal=r.data.items||[];content.innerHTML=pageHeaderBlock('Rekomendasi Order','Current Stock ≤ Min Stock. Recommended Qty mempertimbangkan outstanding DRAFT/ORDERED/PARTIAL.','<div class="report-actions"><button class="btn btn-secondary" id="frPrintReorder">Print / Cetak</button></div>')+'<div class="panel"><div id="reorderPrintArea"><div class="print-meta"><strong>Rekomendasi Order</strong><span>Dicetak: '+escFinal(new Date().toLocaleString('id-ID'))+'</span></div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Stok</th><th>Min</th><th>Max</th><th>Outstanding</th><th>Recommended</th><th>Harga</th><th class="no-print">Aksi</th></tr></thead><tbody>'+ (state.reorderFinal.length?state.reorderFinal.map(function(x){return '<tr><td><strong>'+escFinal(x.sku)+'</strong></td><td>'+escFinal(x.productName)+'</td><td>'+fmtFinal(x.currentStock)+'</td><td>'+fmtFinal(x.minStock)+'</td><td>'+fmtFinal(x.maxStock)+'</td><td>'+fmtFinal(x.outstandingOrder)+'</td><td><strong>'+fmtFinal(x.recommendedQty)+'</strong></td><td>'+moneyFinal(x.price)+'</td><td class="no-print"><button class="btn btn-primary btn-sm rfPO" data-id="'+escFinal(x.productId)+'">Buat PO</button></td></tr>';}).join(''):emptyRowFinal(9,'Tidak ada rekomendasi.'))+'</tbody></table></div></div></div>';onFinal('frPrintReorder','click',function(){printHtmlFinal('reorderPrintArea','Rekomendasi Order');});document.querySelectorAll('.rfPO').forEach(function(b){b.onclick=function(){var x=state.reorderFinal.find(function(z){return String(z.productId)===String(b.dataset.id);});openPOFinal(x);};});}
