@@ -309,3 +309,7 @@ Only `app.js`, `styles.css`, and the updated Apps Script `Code.gs` need to chang
 Admin tetap menggunakan login username/password. Staff tidak menggunakan password; Staff masuk melalui tombol **Masuk Mode Staff** dan mengisi Nama Staff serta Departemen. Sistem membuat session STAFF sementara, sehingga Staff dapat mencari barang, scan barcode, membuat pengajuan, melihat Pengajuan Saya, dan mencetak pengajuan. Staff tidak dapat mengakses fungsi admin.
 
 Pencarian Barang Staff memuat daftar barang aktif satu kali lalu memfilter langsung di browser setiap ketikan, sehingga input 1 huruf dapat langsung menampilkan hasil tanpa request per karakter.
+
+## V2.1.1 Print Timestamp Fix
+- Print Pengajuan shows `Dibuat` (original request timestamp) and `Dicetak` (current Asia/Jakarta timestamp).
+- Existing request data is not modified.
