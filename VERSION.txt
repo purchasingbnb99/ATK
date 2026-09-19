@@ -1,2 +1,2 @@
-ATK Inventory V2.5
-Request form compact layout, request-level note, and boxed 3-column print signatures.
+ATK Inventory V2.6
+Request form date moved into the same row as item fields; compact action column.
