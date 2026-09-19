@@ -26,6 +26,7 @@
     receiveScanner: null,
     poScanner: null,
     approvalBadgeTimer: null,
+    staffRequestCart: [],
     libraryPromises: { excel: null, scanner: null },
     caches: {
       categories: [],
@@ -1845,15 +1846,47 @@
     await ensureMasterCaches();
     var staffName=String(state.user&&state.user.name||'').trim();
     var department=String(state.user&&state.user.department||'').trim();
-    content.innerHTML=pageHeaderBlock('Buat Pengajuan','Pengajuan tidak mengurangi stok sampai Admin melakukan approval.','')+'<div class="panel">'+
+    var prefillItems=(state.staffRequestCart||[]).map(function(x){return {productId:String(x.productId||''),qtyRequested:Number(x.qtyRequested||1),note:String(x.note||'')};});
+    content.innerHTML=pageHeaderBlock('Buat Pengajuan','Pengajuan tidak mengurangi stok sampai Admin melakukan approval.','')+
+      '<div class="panel">'+
       '<div class="request-identity-grid"><div class="form-group"><label>Nama Staff</label><input class="field readonly-field" value="'+escFinal(staffName)+'" readonly title="Diisi otomatis dan tidak dapat diedit"></div><div class="form-group"><label>Departemen</label><input class="field readonly-field" value="'+escFinal(department||'General')+'" readonly title="Diisi otomatis dan tidak dapat diedit"></div></div>'+ 
       '<div class="request-items-head"><div>Tanggal</div><div>Barang</div><div>Qty</div><div>Catatan Item</div><div>Aksi</div></div><div id="finalReqItems" class="request-items-stack"></div><button class="btn btn-secondary" id="addFinalReqItem">+ Barang</button><form id="finalCreateReqForm" style="margin-top:16px"><div class="form-group request-general-note"><label>Catatan Umum <span class="field-hint">(akan tampil pada cetakan)</span></label><textarea id="fcrNote" class="field" maxlength="500" placeholder="Keterangan umum pengajuan, misalnya tujuan/kebutuhan barang."></textarea></div><div id="fcrMsg" class="form-message hidden"></div><button class="btn btn-primary" type="submit">Kirim Pengajuan</button></form></div>';
-    addFinalReqRow();
-    onFinal('addFinalReqItem','click',addFinalReqRow);
-    onFinal('finalCreateReqForm','submit',async function(e){e.preventDefault();var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});var m=byIdFinal('fcrMsg');if(!rows.length){messageFinal(m,'Minimal satu barang harus dipilih.','error');return;}var b=this.querySelector('button[type="submit"]');setBtnFinal(b,true,'Mengirim...');try{var result=await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});showGlobalMessage('Pengajuan '+(result.data&&result.data.request?result.data.request.requestNo:'')+' berhasil dibuat. Form siap untuk pengajuan berikutnya.','success');await renderPage('createRequest');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Kirim Pengajuan');}});
+    if(prefillItems.length){prefillItems.forEach(function(x){addFinalReqRow(x);});}
+    else addFinalReqRow();
+    onFinal('addFinalReqItem','click',function(){addFinalReqRow();});
+    onFinal('finalCreateReqForm','submit',async function(e){
+      e.preventDefault();
+      var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});
+      var m=byIdFinal('fcrMsg');
+      if(!rows.length){messageFinal(m,'Minimal satu item wajib dipilih.','error');return;}
+      var invalid=rows.some(function(x){return !x.productId;});
+      if(invalid){messageFinal(m,'Semua baris harus memilih barang.','error');return;}
+      var b=this.querySelector('button[type="submit"]');setBtnFinal(b,true,'Mengirim...');
+      try{
+        var result=await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});
+        state.staffRequestCart=[];
+        showGlobalMessage('Pengajuan '+(result.data&&result.data.request?result.data.request.requestNo:'')+' berhasil dibuat. Form siap untuk pengajuan berikutnya.','success');
+        await renderPage('createRequest');
+      }catch(err){messageFinal(m,friendlyFinal(err),'error');}
+      finally{setBtnFinal(b,false,'Kirim Pengajuan');}
+    });
   }
 
-  function addFinalReqRow(){var c=byIdFinal('finalReqItems'),r=document.createElement('div');r.className='request-item-grid fcr-row';var isFirst=!c.querySelector('.fcr-row');r.innerHTML=(isFirst?'<div class="form-group request-date-field"><input id="fcrDate" class="field" type="date" value="'+todayFinal()+'" required></div>':'<div class="request-date-spacer" aria-hidden="true"></div>')+'<div class="form-group"><select class="field fcr-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fcr-qty','Qty',1)+'<div class="form-group"><input class="field fcr-note" maxlength="300" placeholder="Catatan untuk barang ini"></div><div class="form-group request-remove-field"><button type="button" class="btn btn-danger btn-sm fcr-remove">Hapus</button></div>';c.appendChild(r);r.querySelector('.fcr-remove').onclick=function(){var savedDate=valFinal('fcrDate')||todayFinal();r.remove();var first=c.querySelector('.fcr-row');if(first&&!byIdFinal('fcrDate')){var cell=first.querySelector('.request-date-spacer');if(cell){cell.className='form-group request-date-field';cell.innerHTML='<input id="fcrDate" class="field" type="date" value="'+escFinal(savedDate)+'" required>';}}if(!first)addFinalReqRow();};}
+  function addFinalReqRow(prefill){
+    var c=byIdFinal('finalReqItems'),r=document.createElement('div');
+    r.className='request-item-grid fcr-row';
+    var isFirst=!c.querySelector('.fcr-row');
+    r.innerHTML=(isFirst?'<div class="form-group request-date-field"><input id="fcrDate" class="field" type="date" value="'+todayFinal()+'" required></div>':'<div class="request-date-spacer" aria-hidden="true"></div>')+
+      '<div class="form-group"><select class="field fcr-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fcr-qty','Qty',prefill?Number(prefill.qtyRequested||1):1)+
+      '<div class="form-group"><input class="field fcr-note" maxlength="300" placeholder="Catatan untuk barang ini" value="'+(prefill?escFinal(prefill.note||''):'')+'"></div><div class="form-group request-remove-field"><button type="button" class="btn btn-danger btn-sm fcr-remove">Hapus</button></div>';
+    c.appendChild(r);
+    if(prefill){r.querySelector('.fcr-product').value=String(prefill.productId||'');}
+    r.querySelector('.fcr-remove').onclick=function(){
+      var savedDate=valFinal('fcrDate')||todayFinal();r.remove();var first=c.querySelector('.fcr-row');
+      if(first&&!byIdFinal('fcrDate')){var cell=first.querySelector('.request-date-spacer');if(cell){cell.className='form-group request-date-field';cell.innerHTML='<input id="fcrDate" class="field" type="date" value="'+escFinal(savedDate)+'" required>';}}
+      if(!first)addFinalReqRow();
+    };
+  }
 
   async function renderFinalReorder(content){var r=await apiFinal('reorderRecommendations',{});state.reorderFinal=r.data.items||[];content.innerHTML=pageHeaderBlock('Rekomendasi Order','Current Stock ≤ Min Stock. Recommended Qty mempertimbangkan outstanding DRAFT/ORDERED/PARTIAL.','<div class="report-actions"><button class="btn btn-secondary" id="frPrintReorder">Print / Cetak</button></div>')+'<div class="panel"><div id="reorderPrintArea"><div class="print-meta"><strong>Rekomendasi Order</strong><span>Dicetak: '+escFinal(new Date().toLocaleString('id-ID'))+'</span></div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Stok</th><th>Min</th><th>Max</th><th>Outstanding</th><th>Recommended</th><th>Harga</th><th class="no-print">Aksi</th></tr></thead><tbody>'+ (state.reorderFinal.length?state.reorderFinal.map(function(x){return '<tr><td><strong>'+escFinal(x.sku)+'</strong></td><td>'+escFinal(x.productName)+'</td><td>'+fmtFinal(x.currentStock)+'</td><td>'+fmtFinal(x.minStock)+'</td><td>'+fmtFinal(x.maxStock)+'</td><td>'+fmtFinal(x.outstandingOrder)+'</td><td><strong>'+fmtFinal(x.recommendedQty)+'</strong></td><td>'+moneyFinal(x.price)+'</td><td class="no-print"><button class="btn btn-primary btn-sm rfPO" data-id="'+escFinal(x.productId)+'">Buat PO</button></td></tr>';}).join(''):emptyRowFinal(9,'Tidak ada rekomendasi.'))+'</tbody></table></div></div></div>';onFinal('frPrintReorder','click',function(){printHtmlFinal('reorderPrintArea','Rekomendasi Order');});document.querySelectorAll('.rfPO').forEach(function(b){b.onclick=function(){var x=state.reorderFinal.find(function(z){return String(z.productId)===String(b.dataset.id);});openPOFinal(x);};});}
 
@@ -1986,7 +2019,39 @@
 
   async function renderFinalExport(content){try{await ensureExcelLibraryFinal();}catch(loadErr){showGlobalMessage('Library Excel tidak tersedia.','warning');return;}content.innerHTML=headingFinal('Export Excel','Export dataset .xlsx dari browser.','')+'<div class="panel"><div class="report-actions">'+['products','movements','requests','po','receipts','stock'].map(function(x){return '<button class="btn btn-secondary final-export" data-type="'+x+'">'+x.toUpperCase()+'</button>';}).join('')+'</div></div>';document.querySelectorAll('.final-export').forEach(function(b){b.onclick=async function(){try{var type=b.dataset.type,rows=[];if(type==='products'){var p=await apiFinal('listProducts',{includeInactive:true});rows=p.data.items||[];}else{var r=await apiFinal('stockReport',{reportType:type==='products'?'stock':type});if(type==='requests')rows=(r.data.items||[]).map(function(x){return {requestNo:x.request.requestNo,requestDate:x.request.requestDate,staffName:x.request.staffName,status:x.request.status,items:x.items.length,rejectionReason:x.request.rejectionReason};});else if(type==='po')rows=(r.data.items||[]).map(function(x){return {poNo:x.purchaseOrder.poNo,orderDate:x.purchaseOrder.orderDate,supplier:x.purchaseOrder.supplierName,status:x.purchaseOrder.status,total:x.purchaseOrder.totalAmount,items:x.items.length};});else rows=r.data.items||[];}exportExcelFinal('ATK-Inventory-'+type,rows);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});}
 
-  async function renderFinalScanner(content){content.innerHTML=headingFinal('Barcode Scanner','Scan barcode bawaan barang, cari produk, lalu simpan barcode baru atau edit data produk yang sudah terdaftar.','')+'<div class="panel scanner-box"><div id="finalScannerArea" class="scanner-stage"></div><div class="report-actions"><button class="btn btn-primary" id="startFinalScanner">Mulai Kamera</button><button class="btn btn-secondary" id="stopFinalScanner">Stop Kamera</button></div>'+fieldFinal('manualFinalBarcode','Barcode Manual','',100,false)+'<button class="btn btn-secondary" id="manualFinalSearch">Cari</button><div id="scannerFinalMsg" class="form-message hidden"></div><div id="scannerFinalResult" class="scan-result" style="margin-top:12px">Belum ada hasil.</div><div id="scannerFinalProduct"></div></div>';await stopFinalScanner();await stopProductScanner();onFinal('startFinalScanner','click',startFinalScanner);onFinal('stopFinalScanner','click',stopFinalScanner);onFinal('manualFinalSearch','click',function(){lookupFinalBarcode(valFinal('manualFinalBarcode'));});}
+  async function renderFinalScanner(content){
+    var isStaff=String(state.user&&state.user.role||'').toUpperCase()==='STAFF';
+    content.innerHTML=headingFinal('Barcode Scanner','Scan barcode barang untuk melihat informasi dan membuat pengajuan dengan cepat.','')+
+      '<div class="panel scanner-box"><div id="finalScannerArea" class="scanner-stage"></div><div class="report-actions"><button class="btn btn-primary" id="startFinalScanner">Mulai Kamera</button><button class="btn btn-secondary" id="stopFinalScanner">Stop Kamera</button></div>'+
+      fieldFinal('manualFinalBarcode','Barcode Manual','',100,false)+'<button class="btn btn-secondary" id="manualFinalSearch">Cari</button><div id="scannerFinalMsg" class="form-message hidden"></div><div id="scannerFinalResult" class="scan-result" style="margin-top:12px">Belum ada hasil.</div><div id="scannerFinalProduct"></div>'+
+      (isStaff?'<div id="staffScanCartPanel" class="scan-cart-panel" style="margin-top:14px"></div>':'')+'</div>';
+    await stopFinalScanner();await stopProductScanner();renderStaffScanCartFinal();
+    onFinal('startFinalScanner','click',startFinalScanner);onFinal('stopFinalScanner','click',stopFinalScanner);onFinal('manualFinalSearch','click',function(){lookupFinalBarcode(valFinal('manualFinalBarcode'));});
+  }
+
+  function renderStaffScanCartFinal(){
+    var isStaff=String(state.user&&state.user.role||'').toUpperCase()==='STAFF';
+    var box=byIdFinal('staffScanCartPanel');
+    if(!isStaff||!box)return;
+    var cart=state.staffRequestCart||[];
+    if(!cart.length){box.innerHTML='<div class="info-strip">Belum ada barang dalam pengajuan sementara.</div>';return;}
+    var total=cart.reduce(function(n,x){return n+Number(x.qtyRequested||0);},0);
+    box.innerHTML='<div class="panel-header"><h4 class="panel-title">Pengajuan Sementara</h4><span class="badge info">'+fmtFinal(cart.length)+' barang / '+fmtFinal(total)+' qty</span></div>'+
+      '<div class="scan-cart-list">'+cart.map(function(x){return '<div class="scan-cart-row"><div><strong>'+escFinal(x.productName)+'</strong><div class="muted-cell">'+escFinal(x.sku)+' · Qty '+fmtFinal(x.qtyRequested)+'</div></div><button type="button" class="btn btn-secondary btn-sm scRemoveCart" data-id="'+escFinal(x.productId)+'">Hapus</button></div>';}).join('')+'</div>'+
+      '<div class="report-actions" style="margin-top:10px"><button type="button" class="btn btn-primary" id="staffCartContinue">Lanjut ke Pengajuan</button><button type="button" class="btn btn-secondary" id="staffCartClear">Kosongkan</button></div>';
+    document.querySelectorAll('.scRemoveCart').forEach(function(b){b.onclick=function(){state.staffRequestCart=(state.staffRequestCart||[]).filter(function(x){return String(x.productId)!==String(b.dataset.id);});renderStaffScanCartFinal();};});
+    onFinal('staffCartContinue','click',function(){state.activePage='createRequest';renderPage('createRequest');});
+    onFinal('staffCartClear','click',function(){state.staffRequestCart=[];renderStaffScanCartFinal();});
+  }
+
+  function addScannedProductToStaffCartFinal(p){
+    var id=String(p&&p.productId||'').trim();if(!id)return '';
+    var cart=state.staffRequestCart||[];var existing=cart.find(function(x){return String(x.productId)===id;});
+    if(existing){existing.qtyRequested=Number(existing.qtyRequested||0)+1;}
+    else{cart.push({productId:id,sku:String(p.sku||''),productName:String(p.name||''),qtyRequested:1,note:''});}
+    state.staffRequestCart=cart;return existing?'incremented':'added';
+  }
+
   async function startFinalScanner(){
     try{await ensureScannerLibraryFinal();}catch(loadErr){showGlobalMessage('Scanner tidak tersedia. Gunakan input manual.','warning');return;}
     if(state.finalScanner)return;
@@ -1998,7 +2063,16 @@
   }
 
   async function stopFinalScanner(){if(!state.finalScanner)return;try{await state.finalScanner.stop();}catch(err){}try{state.finalScanner.clear();}catch(err2){}state.finalScanner=null;}
-  async function lookupFinalBarcode(code){var clean=String(code||'').trim();if(!clean){messageFinal(byIdFinal('scannerFinalMsg'),'Barcode belum diisi.','warning');return;}setTextFinal('scannerFinalResult',clean);try{var r=await apiFinal('searchProducts',{barcode:clean});var p=(r.data.items||[])[0];if(p){var isAdmin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';var editAction=isAdmin?'<button type="button" class="btn btn-primary" id="scannerEditProduct">Edit Barang</button>':'';setHTMLFinal('scannerFinalProduct','<div class="panel scanner-product-card" style="margin-top:12px"><div class="panel-header"><h4 class="panel-title">Barang ditemukan</h4><span class="badge success">Terdaftar</span></div><strong>'+escFinal(p.name)+'</strong><p class="panel-copy">SKU: '+escFinal(p.sku)+' · Barcode: '+escFinal(p.barcode)+' · Stok: '+fmtFinal(p.currentStock)+' · Lokasi: '+escFinal(p.location)+'</p><div class="report-actions" style="margin-top:12px">'+editAction+'<button type="button" class="btn btn-secondary" id="scannerScanAgain">Scan Lagi</button></div></div>');if(isAdmin){onFinal('scannerEditProduct','click',async function(){try{await ensureMasterCaches();openProductModal(p);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}});}onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult','Siap scan berikutnya.');setHTMLFinal('scannerFinalProduct','');startFinalScanner();});}else{var admin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';var saveAction=admin?'<button type="button" class="btn btn-primary" id="scannerSaveNewProduct">Simpan sebagai Barang</button>':'<div class="info-strip scanner-prefill-note">Barcode belum terdaftar. Hubungi Admin untuk menyimpan barcode ini sebagai Master Barang.</div>';setHTMLFinal('scannerFinalProduct','<div class="panel scanner-product-card" style="margin-top:12px"><div class="panel-header"><h4 class="panel-title">Barcode belum terdaftar</h4><span class="badge warning">Baru</span></div><p class="panel-copy">Barcode <strong>'+escFinal(clean)+'</strong> belum memiliki data barang.'+(admin?' Simpan sebagai barang baru untuk melengkapi SKU, nama, kategori, supplier, stok minimum/maksimum, harga, dan lokasi.':'')+'</p><div class="report-actions" style="margin-top:12px">'+saveAction+'<button type="button" class="btn btn-secondary" id="scannerScanAgain">Scan Lagi</button></div></div>');if(admin){onFinal('scannerSaveNewProduct','click',async function(){try{await ensureMasterCaches();openProductModal({barcode:clean},{forceCreate:true,fromScanner:true});}catch(err){showGlobalMessage(friendlyFinal(err),'error');}});}onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult','Siap scan berikutnya.');setHTMLFinal('scannerFinalProduct','');startFinalScanner();});}}catch(err){showGlobalMessage(friendlyFinal(err),'error');}}
+  async function lookupFinalBarcode(code){var clean=String(code||'').trim();if(!clean){messageFinal(byIdFinal('scannerFinalMsg'),'Barcode belum diisi.','warning');return;}setTextFinal('scannerFinalResult',clean);try{var r=await apiFinal('searchProducts',{barcode:clean});var p=(r.data.items||[])[0];if(p){var isAdmin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';var isStaff=String(state.user&&state.user.role||'').toUpperCase()==='STAFF';
+var editAction=isAdmin?'<button type="button" class="btn btn-primary" id="scannerEditProduct">Edit Barang</button>':'';
+var staffAction=isStaff?'<button type="button" class="btn btn-primary" id="scannerRequestNow">Ajukan Barang Ini</button><button type="button" class="btn btn-secondary" id="scannerAddToRequest">Tambah ke Pengajuan</button>':'';
+setHTMLFinal('scannerFinalProduct','<div class="panel scanner-product-card" style="margin-top:12px"><div class="panel-header"><h4 class="panel-title">Barang ditemukan</h4><span class="badge success">Terdaftar</span></div><strong>'+escFinal(p.name)+'</strong><p class="panel-copy">SKU: '+escFinal(p.sku)+' · Barcode: '+escFinal(p.barcode)+' · Stok: '+fmtFinal(p.currentStock)+' '+escFinal(p.unit||'unit')+' · Lokasi: '+escFinal(p.location||'BELUM TAHU')+'</p>'+(isStaff&&Number(p.currentStock||0)<=0?'<div class="info-strip">Stok saat ini 0. Pengajuan tetap dapat dibuat dan akan diproses Admin sesuai ketersediaan stok.</div>':'')+'<div class="report-actions" style="margin-top:12px">'+editAction+staffAction+'<button type="button" class="btn btn-secondary" id="scannerScanAgain">Scan Lagi</button></div></div>');
+if(isAdmin){onFinal('scannerEditProduct','click',async function(){try{await ensureMasterCaches();openProductModal(p);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}});}
+if(isStaff){
+  onFinal('scannerRequestNow','click',function(){addScannedProductToStaffCartFinal(p);state.activePage='createRequest';renderPage('createRequest');});
+  onFinal('scannerAddToRequest','click',function(){var action=addScannedProductToStaffCartFinal(p);messageFinal(byIdFinal('scannerFinalMsg'),'Barang '+p.name+' '+(action==='incremented'?'ditambah 1 Qty ke':'ditambahkan ke')+' pengajuan sementara.','success');renderStaffScanCartFinal();});
+}
+onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult','Siap scan berikutnya.');setHTMLFinal('scannerFinalProduct','');startFinalScanner();});}else{var admin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';var saveAction=admin?'<button type="button" class="btn btn-primary" id="scannerSaveNewProduct">Simpan sebagai Barang</button>':'<div class="info-strip scanner-prefill-note">Barcode belum terdaftar. Hubungi Admin untuk menyimpan barcode ini sebagai Master Barang.</div>';setHTMLFinal('scannerFinalProduct','<div class="panel scanner-product-card" style="margin-top:12px"><div class="panel-header"><h4 class="panel-title">Barcode belum terdaftar</h4><span class="badge warning">Baru</span></div><p class="panel-copy">Barcode <strong>'+escFinal(clean)+'</strong> belum memiliki data barang.'+(admin?' Simpan sebagai barang baru untuk melengkapi SKU, nama, kategori, supplier, stok minimum/maksimum, harga, dan lokasi.':'')+'</p><div class="report-actions" style="margin-top:12px">'+saveAction+'<button type="button" class="btn btn-secondary" id="scannerScanAgain">Scan Lagi</button></div></div>');if(admin){onFinal('scannerSaveNewProduct','click',async function(){try{await ensureMasterCaches();openProductModal({barcode:clean},{forceCreate:true,fromScanner:true});}catch(err){showGlobalMessage(friendlyFinal(err),'error');}});}onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult','Siap scan berikutnya.');setHTMLFinal('scannerFinalProduct','');startFinalScanner();});}}catch(err){showGlobalMessage(friendlyFinal(err),'error');}}
 
   function headingFinal(t,d,a){return '<div class="page-heading flex-heading"><div><h3>'+escFinal(t)+'</h3><p>'+escFinal(d)+'</p></div>'+(a||'')+'</div>';}
   function fieldFinal(id,label,val,max,req,type){return '<div class="form-group"><label>'+escFinal(label)+'</label><input id="'+id+'" class="field" type="'+(type||'text')+'" maxlength="'+max+'" '+(req?'required':'')+' value="'+escFinal(val||'')+'"></div>';}
@@ -2303,6 +2377,7 @@
     state.sessionToken = '';
     state.expiresAt = '';
     state.user = null;
+    state.staffRequestCart = [];
     state.caches = {
       categories: [],
       suppliers: [],

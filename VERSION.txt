@@ -1,2 +1,1 @@
-ATK Inventory V2.6
-Request form date moved into the same row as item fields; compact action column.
+ATK Inventory - Scanner Staff V2.7
