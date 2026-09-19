@@ -21,7 +21,8 @@ var LOGIN_USER_CACHE_PREFIX = 'ATK_LOGIN_USER_';
 var LOGIN_USER_CACHE_SECONDS = 30;
 
 var PUBLIC_ACTIONS = {
-  login: true
+  login: true,
+  createStaffSession: true
 };
 
 var ADMIN_ACTIONS = {
@@ -101,6 +102,14 @@ function doPost(e) {
       });
     }
 
+    if (action === 'createStaffSession') {
+      return jsonOutput_({
+        ok: true,
+        action: 'createStaffSession',
+        data: createStaffSession_(data)
+      });
+    }
+
     var session = requireSession_(sessionToken);
     authorizeAction_(action, session.user);
 
@@ -170,6 +179,49 @@ function getOrCreateApiKey() {
   }
 
   return key;
+}
+
+function createStaffSession_(data) {
+  var name = String(data.name || '').trim();
+  var department = String(data.department || '').trim();
+
+  if (!name) {
+    throw createApiError_('VALIDATION_ERROR', 'Nama Staff wajib diisi.', 400);
+  }
+  if (name.length > 100) {
+    throw createApiError_('VALIDATION_ERROR', 'Nama Staff maksimal 100 karakter.', 400);
+  }
+  if (department.length > 100) {
+    throw createApiError_('VALIDATION_ERROR', 'Departemen maksimal 100 karakter.', 400);
+  }
+
+  var token = Utilities.getUuid().replace(/-/g, '') +
+    Utilities.getUuid().replace(/-/g, '');
+  var publicUserId = 'PUBLIC_STAFF_' + Utilities.getUuid().replace(/-/g, '');
+  var now = nowIso_();
+  var expiresAt = new Date(new Date().getTime() + SESSION_TTL_SECONDS * 1000).toISOString();
+  var session = {
+    token: token,
+    userId: publicUserId,
+    username: publicUserId,
+    name: name,
+    role: 'STAFF',
+    department: department,
+    publicStaff: true,
+    createdAt: now,
+    expiresAt: expiresAt
+  };
+
+  PropertiesService.getScriptProperties().setProperty(
+    SESSION_PREFIX + token,
+    JSON.stringify(session)
+  );
+
+  return {
+    sessionToken: token,
+    expiresAt: expiresAt,
+    user: sanitizeSessionUser_(session)
+  };
 }
 
 function getLoginUserByUsername_(username) {
@@ -339,6 +391,13 @@ function authorizeAction_(action, user) {
   }
 
   if (AUTHENTICATED_ACTIONS[action]) {
+    if (action === 'changePassword' && user.publicStaff) {
+      throw createApiError_(
+        'FORBIDDEN',
+        'Mode Staff tanpa login tidak memiliki password.',
+        403
+      );
+    }
     if (STAFF_ONLY_ACTIONS[action] && role !== 'STAFF') {
       throw createApiError_(
         'FORBIDDEN',
@@ -531,6 +590,16 @@ function handleDashboard_(user) {
   requests.forEach(function (x) { if (String(x.status || '').toUpperCase() === 'MENUNGGU') pendingRequests++; });
   var openPurchaseOrders = 0;
   purchaseOrders.forEach(function (x) { if (['DRAFT', 'ORDERED', 'PARTIAL'].indexOf(String(x.status || '').toUpperCase()) >= 0) openPurchaseOrders++; });
+
+  if (user && user.publicStaff) {
+    return {
+      user: sanitizeSessionUser_(user),
+      summary: { products: activeProducts },
+      usage30Days: [],
+      topUsedProducts: [],
+      alerts: {}
+    };
+  }
 
   return {
     user: sanitizeSessionUser_(user),
@@ -1458,7 +1527,8 @@ function sanitizeSessionUser_(user) {
     username: String(user.username || ''),
     name: String(user.name || ''),
     role: normalizeRole_(user.role),
-    department: String(user.department || '')
+    department: String(user.department || ''),
+    publicStaff: user && user.publicStaff === true
   };
 }
 
