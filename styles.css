@@ -974,6 +974,9 @@ body::before {
 .select-all{display:inline-flex;align-items:center;gap:8px;font-size:.82rem;font-weight:800;color:var(--text);cursor:pointer}
 .select-all input,.frSelect{width:18px;height:18px;accent-color:#2563eb}
 .selected-print-area{position:absolute;left:-100000px;top:0;width:1000px;background:#fff;color:#111;padding:20px}
+.print-signature{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:28px;page-break-inside:avoid}.signature-box{min-height:120px;text-align:center}.signature-title{font-weight:700}.signature-space{height:72px}.signature-name{min-height:18px;font-weight:600;text-decoration:underline}.selected-print-area .print-signature{display:grid}
+@media print{.print-signature{page-break-inside:avoid}}
+
 
 .readonly-field { background: #eef2f7 !important; color: #64748b !important; border-color: #d7dee8 !important; cursor: not-allowed; font-weight: 600; }
 .readonly-field:focus { box-shadow: none !important; }

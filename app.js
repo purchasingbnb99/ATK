@@ -1801,6 +1801,7 @@
         '</tbody></table>'+
         '<div style="height:10px"></div><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Qty Diminta</th><th>Qty Disetujui</th><th>Catatan</th></tr></thead><tbody>'+((x.items||[]).map(function(i){return '<tr><td>'+escFinal(i.sku)+'</td><td>'+escFinal(i.productName)+'</td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.qtyApproved)+'</td><td>'+escFinal(i.note||'-')+'</td></tr>';}).join('')||'<tr><td colspan="5">Tidak ada item.</td></tr>')+'</tbody></table>'+
         (r.rejectionReason?'<p><strong>Alasan Reject:</strong> '+escFinal(r.rejectionReason)+'</p>':'')+
+        '<div class=\"print-signature\"><div class=\"signature-box\"><div class=\"signature-title\">Dibuat oleh</div><div class=\"signature-space\"></div><div class=\"signature-name\">'+escFinal(String(state.user&&state.user.name||r.staffName||'-'))+'</div></div><div class=\"signature-box\"><div class=\"signature-title\">Diketahui oleh</div><div class=\"signature-space\"></div><div class=\"signature-name\">&nbsp;</div></div><div class=\"signature-box\"><div class=\"signature-title\">Disetujui oleh</div><div class=\"signature-space\"></div><div class=\"signature-name\">&nbsp;</div></div></div>'+
         '</section>');
     });
     return parts.join('');

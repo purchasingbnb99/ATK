@@ -1,1 +1,2 @@
-Request Workflow V2.2 - rejected edit product preload, staff print selection count, unified dashboard, outbound usage fix
+ATK Inventory V2.4
+Staff Print Pengajuan: 3 kolom tanda tangan (Dibuat oleh, Diketahui oleh, Disetujui oleh).
