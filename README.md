@@ -271,5 +271,14 @@ Pembaruan production-ready:
 
 Versi ini mempertahankan backend dan API yang sudah berfungsi, dengan penyempurnaan frontend: menu modul pada sidebar tampil sebagai kartu berwarna, memiliki efek glow saat hover/focus, dashboard memakai kartu statistik berwarna, dan background aplikasi menggunakan pola/grid halus berbasis CSS. Layout tetap responsif untuk desktop dan HP.
 
-### Camera / Barcode troubleshooting
-The latest frontend uses a more compatible camera startup flow for mobile browsers. It starts the scanner directly with the rear-camera preference, falls back to a second constraint form when needed, checks HTTPS/media-device availability, and converts browser camera errors into clear user-facing messages. If camera permission was previously denied, allow camera access for the Vercel site and press **Mulai Kamera** again.
+
+## Final Operational Enhancement 1.2.0
+- Dashboard now shows 30-day OUT usage, top used items, and operational alerts.
+- Purchase Order modal supports barcode scanning to add/increment PO items.
+- Barang Masuk and Adjustment / Opname forms are centered on desktop.
+- Histori Mutasi now auto-loads, supports reset, and handles spreadsheet date values robustly.
+- Rekomendasi Order has Print / Cetak.
+- Laporan includes completed report rendering for stock, requests, PO, receipts, and movements.
+
+### Important deployment note
+Only `app.js`, `styles.css`, and the updated Apps Script `Code.gs` need to change from the previous production package. Keep the existing Vercel Environment Variables and Apps Script API key. After updating `Code.gs`, deploy a new Apps Script Web App version, then redeploy Vercel.
