@@ -54,7 +54,7 @@ var HEADERS = {
   '08_REQUESTS': [
     'requestId', 'requestNo', 'requestDate', 'staffId', 'staffName',
     'department', 'status', 'rejectionReason', 'approvedBy',
-    'approvedAt', 'rejectedBy', 'rejectedAt', 'createdAt', 'updatedAt'
+    'approvedAt', 'rejectedBy', 'rejectedAt', 'createdAt', 'updatedAt', 'note'
   ],
   '09_REQUEST_ITEMS': [
     'requestItemId', 'requestId', 'productId', 'sku', 'productName',

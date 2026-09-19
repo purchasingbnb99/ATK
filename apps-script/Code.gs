@@ -1931,12 +1931,24 @@ function adjustStockFinal_(data,user){
   });
 }
 
+function ensureRequestNoteColumn_(){
+  var sheet=getSheet_(SHEETS.REQUESTS);
+  var lastCol=sheet.getLastColumn();
+  if(lastCol<1)throw new Error('Sheet 08_REQUESTS tidak memiliki header.');
+  var headers=sheet.getRange(1,1,1,lastCol).getValues()[0];
+  if(headers.indexOf('note')>=0)return;
+  sheet.insertColumnAfter(lastCol);
+  sheet.getRange(1,lastCol+1).setValue('note').setFontWeight('bold').setWrap(true);
+  sheet.autoResizeColumn(lastCol+1);
+}
+
 function createRequestFinal_(data,user){
   requireStaffFinal_(user);
   return lockRun_(function(){
+    ensureRequestNoteColumn_();
     var items=Array.isArray(data.items)?data.items:[];if(!items.length)throw createApiError_('VALIDATION_ERROR','Minimal satu item wajib diisi.',400);
     var ps=getSheet_(SHEETS.PRODUCTS),rs=getSheet_(SHEETS.REQUESTS),is=getSheet_(SHEETS.REQUEST_ITEMS),products=getRowsAsObjects_(ps),seen={};
-    var reqId=Utilities.getUuid(),reqNo=nextDocumentNoFinal_('REQ'),now=nowIso_(),req={requestId:reqId,requestNo:reqNo,requestDate:normalizeDateFinal_(data.requestDate),staffId:String(user.userId),staffName:String(user.name||user.username),department:String(user.department||''),status:'MENUNGGU',rejectionReason:'',approvedBy:'',approvedAt:'',rejectedBy:'',rejectedAt:'',createdAt:now,updatedAt:now};
+    var reqId=Utilities.getUuid(),reqNo=nextDocumentNoFinal_('REQ'),now=nowIso_(),req={requestId:reqId,requestNo:reqNo,requestDate:normalizeDateFinal_(data.requestDate),staffId:String(user.userId),staffName:String(user.name||user.username),department:String(user.department||''),status:'MENUNGGU',rejectionReason:'',approvedBy:'',approvedAt:'',rejectedBy:'',rejectedAt:'',createdAt:now,updatedAt:now,note:String(data.note||'').trim()};
     var out=[];
     items.forEach(function(it){
       var pid=String(it.productId||'').trim(),qty=Number(it.qtyRequested);if(!pid||!isFinite(qty)||qty<=0)throw createApiError_('VALIDATION_ERROR','Item pengajuan tidak valid.',400);if(seen[pid])throw createApiError_('VALIDATION_ERROR','Produk yang sama tidak boleh dua kali.',400);seen[pid]=1;
@@ -2110,6 +2122,7 @@ function editRejectedRequestFinal_(data,user){
   var role=String(user&&user.role||'').toUpperCase();
   if(role!=='ADMIN'&&role!=='STAFF')throw createApiError_('FORBIDDEN','Mode Staff atau Admin diperlukan.',403);
   return lockRun_(function(){
+    ensureRequestNoteColumn_();
     var rid=String(data.requestId||'').trim(),items=Array.isArray(data.items)?data.items:[],date=String(data.requestDate||'').trim();
     if(!rid||!date||!items.length)throw createApiError_('VALIDATION_ERROR','Request, tanggal, dan minimal satu item wajib diisi.',400);
     var rs=getSheet_(SHEETS.REQUESTS),is=getSheet_(SHEETS.REQUEST_ITEMS),ps=getSheet_(SHEETS.PRODUCTS);
@@ -2139,6 +2152,7 @@ function editRejectedRequestFinal_(data,user){
     rows.forEach(function(rowNum){is.deleteRow(rowNum);});
     appendRowsFinal_(is,HEADERS[SHEETS.REQUEST_ITEMS],out);
     setFieldFinal_(rs,rr,'requestDate',normalizeDateFinal_(date));
+    setFieldFinal_(rs,rr,'note',String(data.note||'').trim());
     setFieldFinal_(rs,rr,'status','MENUNGGU');
     setFieldFinal_(rs,rr,'rejectionReason','');
     setFieldFinal_(rs,rr,'rejectedBy','');
@@ -2345,7 +2359,7 @@ function normalizeDateFinal_(value){var t=String(value||'').trim();if(!t)t=Utili
 function normalizeDateOptionalFinal_(value){if(value===undefined||value===null||value==='')return'';return normalizeDateFinal_(value)}
 function firstValueFinal_(o,keys){for(var i=0;i<keys.length;i++){if(o[keys[i]]!==undefined&&o[keys[i]]!==null&&o[keys[i]]!=='')return o[keys[i]];}return'';}
 function sanitizeMovementFinal_(x){return {movementId:String(x.movementId||''),movementDate:dateOnlyFinal_(x.movementDate)||String(x.movementDate||''),productId:String(x.productId||''),sku:String(x.sku||''),productName:String(x.productName||''),type:String(x.type||''),qty:Number(x.qty||0),stockBefore:Number(x.stockBefore||0),stockAfter:Number(x.stockAfter||0),referenceType:String(x.referenceType||''),referenceId:String(x.referenceId||''),userId:String(x.userId||''),userName:String(x.userName||''),note:String(x.note||''),createdAt:String(x.createdAt||'')};}
-function sanitizeRequestFinal_(x){return {requestId:String(x.requestId||''),requestNo:String(x.requestNo||''),requestDate:String(x.requestDate||''),staffId:String(x.staffId||''),staffName:String(x.staffName||''),department:String(x.department||''),status:String(x.status||''),rejectionReason:String(x.rejectionReason||''),approvedBy:String(x.approvedBy||''),approvedAt:String(x.approvedAt||''),rejectedBy:String(x.rejectedBy||''),rejectedAt:String(x.rejectedAt||''),createdAt:String(x.createdAt||''),updatedAt:String(x.updatedAt||'')};}
+function sanitizeRequestFinal_(x){return {requestId:String(x.requestId||''),requestNo:String(x.requestNo||''),requestDate:String(x.requestDate||''),staffId:String(x.staffId||''),staffName:String(x.staffName||''),department:String(x.department||''),status:String(x.status||''),rejectionReason:String(x.rejectionReason||''),approvedBy:String(x.approvedBy||''),approvedAt:String(x.approvedAt||''),rejectedBy:String(x.rejectedBy||''),rejectedAt:String(x.rejectedAt||''),createdAt:String(x.createdAt||''),updatedAt:String(x.updatedAt||''),note:String(x.note||'')};}
 function sanitizeRequestItemFinal_(x){return {requestItemId:String(x.requestItemId||''),requestId:String(x.requestId||''),productId:String(x.productId||''),sku:String(x.sku||''),productName:String(x.productName||''),unit:String(x.unit||''),qtyRequested:Number(x.qtyRequested||0),qtyApproved:Number(x.qtyApproved||0),stockAtRequest:Number(x.stockAtRequest||0),note:String(x.note||'')};}
 function sanitizePurchaseOrderFinal_(x){return {poId:String(x.poId||''),poNo:String(x.poNo||''),supplierId:String(x.supplierId||''),supplierName:String(x.supplierName||''),orderDate:String(x.orderDate||''),status:String(x.status||''),totalAmount:Number(x.totalAmount||0),createdBy:String(x.createdBy||''),createdAt:String(x.createdAt||''),updatedAt:String(x.updatedAt||'')};}
 function sanitizePurchaseItemFinal_(x){return {poItemId:String(x.poItemId||''),poId:String(x.poId||''),productId:String(x.productId||''),sku:String(x.sku||''),productName:String(x.productName||''),unit:String(x.unit||''),qtyOrdered:Number(x.qtyOrdered||0),qtyReceived:Number(x.qtyReceived||0),qtyRemaining:Number(x.qtyRemaining||0),price:Number(x.price||0),subtotal:Number(x.subtotal||0)};}
