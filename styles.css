@@ -930,3 +930,33 @@ body::before {
 .staff-entry-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}.staff-entry-head h3{margin:0;font-size:1rem}.staff-entry-head p{margin:4px 0 0;color:var(--muted);font-size:.8rem;line-height:1.45}
 
 .staff-dashboard-note{margin-top:18px}.staff-dashboard-note .panel-copy{max-width:720px;line-height:1.6}
+
+/* Request approval notification + search */
+.nav-item { position: relative; }
+.nav-label { min-width: 0; }
+.nav-pending-badge {
+  margin-left: auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 3px 10px rgba(220,38,38,.28);
+}
+.request-filter {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 210px;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.request-filter .field { width: 100%; }
+@media(max-width:760px){
+  .request-filter { grid-template-columns: 1fr; }
+}

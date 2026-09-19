@@ -24,6 +24,7 @@
     productScanner: null,
     receiveScanner: null,
     poScanner: null,
+    approvalBadgeTimer: null,
     libraryPromises: { excel: null, scanner: null },
     caches: {
       categories: [],
@@ -278,6 +279,7 @@
   }
 
   async function handleLogout() {
+    if (state.approvalBadgeTimer) { window.clearInterval(state.approvalBadgeTimer); state.approvalBadgeTimer = null; }
     stopFinalScanner();
     stopProductScanner();
     stopReceiveScanner();
@@ -488,6 +490,7 @@
     applyUserIdentity();
     buildNavigation();
     renderPage('dashboard');
+    startApprovalBadgePolling();
     setConnectionStatus('online');
   }
 
@@ -535,7 +538,8 @@
       button.setAttribute('data-action', item.action);
       button.innerHTML =
         '<span class="nav-icon">' + escapeHtml(item.icon) + '</span>' +
-        '<span>' + escapeHtml(item.label) + '</span>';
+        '<span class="nav-label">' + escapeHtml(item.label) + '</span>' +
+        (item.action === 'listRequests' && role === 'ADMIN' ? '<span class="nav-pending-badge hidden" id="approvalPendingBadge">0</span>' : '');
 
       button.addEventListener('click', function () {
         state.activePage = this.getAttribute('data-action') || 'dashboard';
@@ -547,6 +551,34 @@
     }
 
     updateActiveNavigation();
+  }
+
+  async function refreshApprovalBadge() {
+    if (!state.user || String(state.user.role || '').toUpperCase() !== 'ADMIN') return;
+    var badge = document.getElementById('approvalPendingBadge');
+    if (!badge) return;
+    try {
+      var result = await apiRequest('listRequests', {});
+      var items = result.data && Array.isArray(result.data.items) ? result.data.items : [];
+      var pending = items.filter(function (x) {
+        return x && x.request && String(x.request.status || '').toUpperCase() === 'MENUNGGU';
+      }).length;
+      badge.textContent = String(pending);
+      badge.classList.toggle('hidden', pending <= 0);
+      badge.setAttribute('aria-label', pending + ' pengajuan menunggu approval');
+    } catch (err) {
+      // Badge is informative only; do not block the application when refresh fails.
+    }
+  }
+
+  function startApprovalBadgePolling() {
+    if (state.approvalBadgeTimer) {
+      window.clearInterval(state.approvalBadgeTimer);
+      state.approvalBadgeTimer = null;
+    }
+    if (!state.user || String(state.user.role || '').toUpperCase() !== 'ADMIN') return;
+    refreshApprovalBadge();
+    state.approvalBadgeTimer = window.setInterval(refreshApprovalBadge, 30000);
   }
 
   function updateActiveNavigation() {
@@ -647,6 +679,15 @@
     var usage = result.data && result.data.usage30Days ? result.data.usage30Days : [];
     var topUsed = result.data && result.data.topUsedProducts ? result.data.topUsedProducts : [];
     var alerts = result.data && result.data.alerts ? result.data.alerts : {};
+
+    if (state.user && String(state.user.role || '').toUpperCase() === 'ADMIN') {
+      var badge = document.getElementById('approvalPendingBadge');
+      var pendingFromDashboard = Number(alerts.pendingRequests || 0);
+      if (badge) {
+        badge.textContent = String(pendingFromDashboard);
+        badge.classList.toggle('hidden', pendingFromDashboard <= 0);
+      }
+    }
 
     if (state.user && state.user.publicStaff) {
       content.innerHTML =
@@ -1644,18 +1685,39 @@
     var title = admin ? 'Approval Pengajuan' : (printOnly ? 'Print Pengajuan' : 'Pengajuan Saya');
     var desc = admin ? 'Approve penuh, approve sebagian, atau reject dengan alasan.' : (printOnly ? 'Cetak daftar pengajuan yang dibuat oleh akun Staff.' : 'Lihat pengajuan sendiri dan batalkan yang masih MENUNGGU.');
     var actionHtml = printOnly ? '<button class="btn btn-secondary no-print" id="frPrintNow">Print</button>' : (!admin ? '<button class="btn btn-primary no-print" id="frNewReq">+ Pengajuan</button>' : '');
-    content.innerHTML=pageHeaderBlock(title,desc,actionHtml)+
-      '<div class="panel"><div class="table-wrap" id="requestPrintArea"><table class="data-table"><thead><tr><th>No</th><th>Tanggal</th><th>Staff</th><th>Dept</th><th>Items</th><th>Status</th><th class="no-print">Aksi</th></tr></thead><tbody id="frReqBody">'+requestRowsFinal()+'</tbody></table></div></div>';
+    var filterHtml = admin && !printOnly ? '<div class="request-filter no-print"><input id="frSearch" class="field" type="search" placeholder="Cari No Pengajuan / Staff / Departemen / Barang..."><select id="frStatusFilter" class="field"><option value="">Semua Status</option><option value="MENUNGGU">Menunggu</option><option value="DISETUJUI_PENUH">Disetujui Penuh</option><option value="DISETUJUI_SEBAGIAN">Disetujui Sebagian</option><option value="DITOLAK">Ditolak</option><option value="DIBATALKAN">Dibatalkan</option></select></div>' : '';
+    content.innerHTML=pageHeaderBlock(title,desc,actionHtml)+filterHtml+
+      '<div class="panel"><div class="table-wrap" id="requestPrintArea"><table class="data-table"><thead><tr><th>No</th><th>Tanggal / Jam</th><th>Staff</th><th>Dept</th><th>Items</th><th>Status</th><th class="no-print">Aksi</th></tr></thead><tbody id="frReqBody">'+requestRowsFinal()+'</tbody></table></div></div>';
     onFinal('frNewReq','click',function(){state.activePage='createRequest';renderPage('createRequest');});
     onFinal('frPrintNow','click',function(){printHtmlFinal('requestPrintArea','Pengajuan Barang');});
+    onFinal('frSearch','input',renderFilteredRequestRowsFinal);
+    onFinal('frStatusFilter','change',renderFilteredRequestRowsFinal);
     bindFinalRequestButtons();
   }
 
-  function requestRowsFinal(){var admin=String(state.user.role).toUpperCase()==='ADMIN';if(!state.requests.length)return emptyRowFinal(7,'Belum ada pengajuan.');return state.requests.map(function(x){var q=x.request;return '<tr><td><strong>'+escFinal(q.requestNo)+'</strong></td><td>'+escFinal(q.requestDate)+'</td><td>'+escFinal(q.staffName)+'</td><td>'+escFinal(q.department||'-')+'</td><td>'+fmtFinal(x.items.length)+'</td><td>'+statusFinal(q.status)+'</td><td class="no-print"><div class="action-group"><button class="btn btn-secondary btn-sm frView" data-id="'+escFinal(q.requestId)+'">Detail</button>'+(admin&&q.status==='MENUNGGU'?'<button class="btn btn-success btn-sm frApprove" data-id="'+escFinal(q.requestId)+'">Approve</button><button class="btn btn-danger btn-sm frReject" data-id="'+escFinal(q.requestId)+'">Reject</button>':'')+(!admin&&q.status==='MENUNGGU'?'<button class="btn btn-danger btn-sm frCancel" data-id="'+escFinal(q.requestId)+'">Batalkan</button>':'')+'</div></td></tr>';}).join('');}
+  function requestRowsFinal(query,status){
+    var admin=String(state.user.role).toUpperCase()==='ADMIN';
+    var q=String(query||'').trim().toLowerCase();
+    var st=String(status||'').trim().toUpperCase();
+    var filtered=state.requests.filter(function(x){
+      var r=x.request||{};
+      if(st&&String(r.status||'').toUpperCase()!==st)return false;
+      if(!q)return true;
+      var hay=[r.requestNo,r.staffName,r.department,r.status].concat((x.items||[]).map(function(i){return i.productName+' '+i.sku;})).join(' ').toLowerCase();
+      return hay.indexOf(q)>=0;
+    });
+    if(!filtered.length)return emptyRowFinal(7,'Tidak ada pengajuan yang sesuai.');
+    return filtered.map(function(x){var r=x.request||{};var stamp=r.createdAt||r.requestDate;return '<tr><td><strong>'+escFinal(r.requestNo)+'</strong></td><td>'+escFinal(formatRequestDateTimeFinal(stamp))+'</td><td>'+escFinal(r.staffName)+'</td><td>'+escFinal(r.department||'-')+'</td><td>'+fmtFinal((x.items||[]).length)+'</td><td>'+statusFinal(r.status)+'</td><td class="no-print"><div class="action-group"><button class="btn btn-secondary btn-sm frView" data-id="'+escFinal(r.requestId)+'">Detail</button>'+(admin&&r.status==='MENUNGGU'?'<button class="btn btn-success btn-sm frApprove" data-id="'+escFinal(r.requestId)+'">Approve</button><button class="btn btn-danger btn-sm frReject" data-id="'+escFinal(r.requestId)+'">Reject</button>':'')+(!admin&&r.status==='MENUNGGU'?'<button class="btn btn-danger btn-sm frCancel" data-id="'+escFinal(r.requestId)+'">Batalkan</button>':'')+'</div></td></tr>';}).join('');
+  }
+
+  function renderFilteredRequestRowsFinal(){
+    setHTMLFinal('frReqBody',requestRowsFinal(valFinal('frSearch'),valFinal('frStatusFilter')));
+    bindFinalRequestButtons();
+  }
 
   function bindFinalRequestButtons(){document.querySelectorAll('.frView').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openRequestFinal(x);};});document.querySelectorAll('.frApprove').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openApproveFinal(x);};});document.querySelectorAll('.frReject').forEach(function(b){b.onclick=function(){var x=state.requests.find(function(z){return String(z.request.requestId)===String(b.dataset.id);});openRejectFinal(x);};});document.querySelectorAll('.frCancel').forEach(function(b){b.onclick=async function(){if(!confirm('Batalkan pengajuan ini?'))return;try{await apiFinal('cancelRequest',{requestId:b.dataset.id});showGlobalMessage('Pengajuan dibatalkan.','success');renderPage('listRequests');}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});}
 
-  function openRequestFinal(x){if(!x)return;openModalFinal('Detail '+x.request.requestNo,'<div class="kpi-row"><div class="kpi">Status<strong>'+escFinal(x.request.status)+'</strong></div><div class="kpi">Tanggal<strong>'+escFinal(x.request.requestDate)+'</strong></div><div class="kpi">Staff<strong>'+escFinal(x.request.staffName)+'</strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Request</th><th>Approve</th><th>Stok Request</th><th>Catatan</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.sku)+'</td><td>'+escFinal(i.productName)+'</td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.qtyApproved)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td>'+escFinal(i.note||'-')+'</td></tr>';}).join('')+'</tbody></table></div>'+(x.request.rejectionReason?'<div class="info-strip"><strong>Alasan:</strong> '+escFinal(x.request.rejectionReason)+'</div>':'')+'','<button class="btn btn-secondary" data-close-modal>Tutup</button>');}
+  function openRequestFinal(x){if(!x)return;openModalFinal('Detail '+x.request.requestNo,'<div class="kpi-row"><div class="kpi">Status<strong>'+escFinal(x.request.status)+'</strong></div><div class="kpi">Tanggal / Jam<strong>'+escFinal(formatRequestDateTimeFinal(x.request.createdAt||x.request.requestDate))+'</strong></div><div class="kpi">Staff<strong>'+escFinal(x.request.staffName)+'</strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Request</th><th>Approve</th><th>Stok Request</th><th>Catatan</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.sku)+'</td><td>'+escFinal(i.productName)+'</td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.qtyApproved)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td>'+escFinal(i.note||'-')+'</td></tr>';}).join('')+'</tbody></table></div>'+(x.request.rejectionReason?'<div class="info-strip"><strong>Alasan:</strong> '+escFinal(x.request.rejectionReason)+'</div>':'')+'','<button class="btn btn-secondary" data-close-modal>Tutup</button>');}
   function openApproveFinal(x){var body='<form id="faReqForm"><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Request</th><th>Stok Saat Request</th><th>Qty Approved</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td><input class="field final-approve-qty" data-id="'+escFinal(i.requestItemId)+'" type="number" min="0" max="'+i.qtyRequested+'" step="1" value="'+i.qtyRequested+'"></td></tr>';}).join('')+'</tbody></table></div><div id="modalMessage" class="form-message hidden"></div></form>';openModalFinal('Approve '+x.request.requestNo,body,'<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="faReqForm">Approve</button>');byIdFinal('faReqForm').onsubmit=async function(e){e.preventDefault();var items=[];document.querySelectorAll('.final-approve-qty').forEach(function(i){items.push({requestItemId:i.dataset.id,qtyApproved:Number(i.value)});});var b=document.querySelector('#modalFooter .btn-primary'),m=byIdFinal('modalMessage');setBtnFinal(b,true,'Memproses...');try{await apiFinal('approveRequest',{requestId:x.request.requestId,items:items});closeModalFinal();showGlobalMessage('Pengajuan berhasil diproses.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Approve');}};}
   function openRejectFinal(x){openModalFinal('Reject '+x.request.requestNo,'<form id="frRejectForm"><div class="form-group"><label>Alasan Reject</label><textarea id="frRejectReason" class="field" maxlength="500" required></textarea></div><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-danger" type="submit" form="frRejectForm">Reject</button>');byIdFinal('frRejectForm').onsubmit=async function(e){e.preventDefault();var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-danger');setBtnFinal(b,true,'Memproses...');try{await apiFinal('rejectRequest',{requestId:x.request.requestId,rejectionReason:valFinal('frRejectReason')});closeModalFinal();showGlobalMessage('Pengajuan ditolak.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Reject');}};}
 
@@ -1668,7 +1730,7 @@
       '<div id="finalReqItems"></div><button class="btn btn-secondary" id="addFinalReqItem">+ Barang</button><form id="finalCreateReqForm" style="margin-top:16px"><div class="form-grid">'+fieldDateFinal('fcrDate','Tanggal')+'</div>'+fieldFinal('fcrNote','Catatan Umum','',500,false)+'<div id="fcrMsg" class="form-message hidden"></div><button class="btn btn-primary">Kirim Pengajuan</button></form></div>';
     addFinalReqRow();
     onFinal('addFinalReqItem','click',addFinalReqRow);
-    onFinal('finalCreateReqForm','submit',async function(e){e.preventDefault();var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});var m=byIdFinal('fcrMsg');if(!rows.length){messageFinal(m,'Minimal satu barang harus dipilih.','error');return;}try{await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});showGlobalMessage('Pengajuan berhasil dibuat.','success');renderPage('myRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}});
+    onFinal('finalCreateReqForm','submit',async function(e){e.preventDefault();var rows=[];document.querySelectorAll('.fcr-row').forEach(function(r){rows.push({productId:r.querySelector('.fcr-product').value,qtyRequested:r.querySelector('.fcr-qty').value,note:r.querySelector('.fcr-note').value});});var m=byIdFinal('fcrMsg');if(!rows.length){messageFinal(m,'Minimal satu barang harus dipilih.','error');return;}try{var result=await apiFinal('createRequest',{requestDate:valFinal('fcrDate'),note:valFinal('fcrNote'),items:rows});showGlobalMessage('Pengajuan '+(result.data&&result.data.request?result.data.request.requestNo:'')+' berhasil dibuat. Form dikosongkan untuk pengajuan berikutnya.','success');renderPage('createRequest');}catch(err){messageFinal(m,friendlyFinal(err),'error');}});
   }
   function addFinalReqRow(){var c=byIdFinal('finalReqItems'),r=document.createElement('div');r.className='form-grid fcr-row';r.innerHTML='<div class="form-group"><label>Barang</label><select class="field fcr-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fcr-qty','Qty',1)+'<div class="form-group"><label>Catatan</label><input class="field fcr-note" maxlength="300"></div><div class="form-group" style="display:flex;align-items:end"><button type="button" class="btn btn-danger fcr-remove">Hapus</button></div>';c.appendChild(r);r.querySelector('.fcr-remove').onclick=function(){r.remove();};}
 
@@ -1834,7 +1896,13 @@
   function setHTMLFinal(id,h){var e=byIdFinal(id);if(e)e.innerHTML=h}
   function setTextFinal(id,v){var e=byIdFinal(id);if(e)e.textContent=String(v==null?'':v)}
   function escFinal(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;')}
-  function fmtFinal(v){return new Intl.NumberFormat('id-ID',{maximumFractionDigits:2}).format(Number(v||0))}
+  function formatRequestDateTimeFinal(value){
+    if(!value)return '-';
+    var d=new Date(value);
+    if(isNaN(d.getTime()))return String(value);
+    try{return new Intl.DateTimeFormat('id-ID',{timeZone:'Asia/Jakarta',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(d);}catch(err){return d.toLocaleString('id-ID');}
+  }
+    function fmtFinal(v){return new Intl.NumberFormat('id-ID',{maximumFractionDigits:2}).format(Number(v||0))}
   function moneyFinal(v){return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(v||0))}
   function todayFinal(){
     var parts = new Intl.DateTimeFormat('en-GB', {
@@ -1854,7 +1922,14 @@
   function friendlyFinal(e){return e&&e.message?String(e.message):'Terjadi kesalahan server.'}
   function openModalFinal(title,body,footer){closeModalFinal();var o=document.createElement('div');o.id='modalOverlay';o.className='modal-overlay';o.innerHTML='<div class="modal-card"><div class="modal-header"><h3>'+escFinal(title)+'</h3><button class="icon-btn" data-close-modal>×</button></div><div class="modal-body">'+body+'</div><div class="modal-footer" id="modalFooter">'+footer+'</div></div>';document.body.appendChild(o);o.querySelectorAll('[data-close-modal]').forEach(function(b){b.onclick=closeModalFinal;});o.addEventListener('click',function(e){if(e.target===o)closeModalFinal();});}
   function closeModalFinal(){stopFinalScanner();stopProductScanner();stopReceiveScanner();stopPOScanner();var o=byIdFinal('modalOverlay');if(o)o.remove()}
-  function printHtmlFinal(id,title){var e=byIdFinal(id);if(!e)return;var w=window.open('','_blank','noopener,noreferrer,width=1100,height=800');if(!w){showGlobalMessage('Popup diblokir browser.','warning');return;}w.document.write('<!doctype html><html><head><title>'+escFinal(title)+'</title><style>body{font-family:Arial,sans-serif;padding:20px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #aaa;padding:6px;text-align:left}th{background:#eee}.no-print{display:none}</style></head><body><h2>'+escFinal(title)+'</h2>'+e.innerHTML+'</body></html>');w.document.close();w.focus();setTimeout(function(){w.print();w.close();},250);}
+  function printHtmlFinal(id,title){
+    var e=byIdFinal(id);
+    if(!e){showGlobalMessage('Area cetak tidak ditemukan.','error');return;}
+    var html='<!doctype html><html><head><meta charset="utf-8"><title>'+escFinal(title)+'</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#111}h2{margin:0 0 14px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #aaa;padding:6px;text-align:left}th{background:#eee}.no-print{display:none!important}.badge{display:inline-block;padding:3px 7px;border-radius:999px}</style></head><body><h2>'+escFinal(title)+'</h2>'+e.innerHTML+'</body></html>';
+    var w=window.open('','_blank','width=1100,height=800');
+    if(!w){showGlobalMessage('Jendela cetak diblokir browser. Izinkan pop-up untuk situs ATK Inventory lalu klik Print kembali.','warning');return;}
+    try{w.document.open();w.document.write(html);w.document.close();w.focus();setTimeout(function(){try{w.print();}catch(err){}} ,400);}catch(err){try{w.close();}catch(closeErr){}showGlobalMessage('Gagal membuka halaman cetak.','error');}
+  }
   async function exportExcelFinal(name,rows){try{await ensureExcelLibraryFinal();}catch(err){showGlobalMessage('Library Excel tidak tersedia.','error');return;}var wb=XLSX.utils.book_new(),ws=XLSX.utils.json_to_sheet(rows||[]);XLSX.utils.book_append_sheet(wb,ws,'Data');XLSX.writeFile(wb,name+'.xlsx');}
   function exportReportFinal(d){if(!d)return;var rows=d.reportType==='requests'?(d.items||[]).map(function(x){return {requestNo:x.request.requestNo,date:x.request.requestDate,staff:x.request.staffName,status:x.request.status,items:x.items.length,rejectionReason:x.request.rejectionReason};}):d.reportType==='po'?(d.items||[]).map(function(x){return {poNo:x.purchaseOrder.poNo,date:x.purchaseOrder.orderDate,supplier:x.purchaseOrder.supplierName,status:x.purchaseOrder.status,total:x.purchaseOrder.totalAmount};}):(d.items||[]);exportExcelFinal('Laporan-'+d.reportType,rows);}
 
