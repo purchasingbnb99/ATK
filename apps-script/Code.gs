@@ -606,7 +606,9 @@ function handleDashboard_(user) {
   });
   var topUsedProducts = Object.keys(productUsage).map(function (k) { return productUsage[k]; });
   topUsedProducts.sort(function (a, c) { return Number(c.qty) - Number(a.qty) || String(a.sku).localeCompare(String(c.sku)); });
-  topUsedProducts = topUsedProducts.slice(0, 5);
+  // Kirim Top 10 agar dashboard dapat menampilkan nama barang secara langsung.
+  // Frontend menggunakan 10 item untuk grafik kiri dan 5 item untuk ringkasan kanan.
+  topUsedProducts = topUsedProducts.slice(0, 10);
 
   var pendingRequests = 0;
   requests.forEach(function (x) { if (String(x.status || '').toUpperCase() === 'MENUNGGU') pendingRequests++; });
