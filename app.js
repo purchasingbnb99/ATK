@@ -1825,7 +1825,7 @@
   function productOptions(){return '<option value="">Pilih barang</option>'+activeItemsFinal(state.products).map(function(x){return '<option value="'+escFinal(x.productId)+'">'+escFinal(x.sku)+' — '+escFinal(x.name)+' (Stok '+fmtFinal(x.currentStock)+')</option>';}).join('');}
   function activeSupplierOptions(){return activeItemsFinal(state.suppliers).map(function(x){return '<option value="'+escFinal(x.supplierId)+'">'+escFinal(x.name)+' ('+escFinal(x.code)+')</option>';}).join('');}
   function activeItemsFinal(a){return (a||[]).filter(function(x){return x.active;});}
-  async function ensureMasterCaches(){var r=await Promise.all([apiFinal('listProducts',{includeInactive:false}),apiFinal('listSuppliers',{}),apiFinal('listCategories',{})]);state.products=r[0].data.items||[];state.suppliers=r[1].data.items||[];state.categories=r[2].data.items||[];}
+  async function ensureMasterCaches(){var isAdmin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';if(isAdmin){var r=await Promise.all([apiFinal('listProducts',{includeInactive:false}),apiFinal('listSuppliers',{}),apiFinal('listCategories',{})]);state.products=r[0].data.items||[];state.suppliers=r[1].data.items||[];state.categories=r[2].data.items||[];return;}var rp=await apiFinal('listProducts',{includeInactive:false});state.products=rp.data.items||[];state.suppliers=[];state.categories=[];}
   async function refreshProductsFinal(){var r=await apiFinal('listProducts',{includeInactive:true});state.products=r.data.items||[];}
   function apiFinal(a,d){return apiRequest(a,d);}
   function byIdFinal(id){return document.getElementById(id)}
