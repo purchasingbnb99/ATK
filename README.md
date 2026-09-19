@@ -21,6 +21,26 @@ atk-inventory/
     └── SetupDatabase.gs
 ```
 
+## UAT Fixes (Staff)
+
+Versi ini mempertahankan scanner camera-stable dan memperbaiki tiga masalah Staff yang ditemukan saat UAT:
+
+1. **Cari Barang (Staff)** sekarang otomatis memuat seluruh barang aktif saat halaman dibuka. Tombol Cari tetap tersedia untuk penyaringan SKU/barcode/nama.
+2. **Buat Pengajuan (Staff)** diizinkan oleh `authorizeAction_()` dan divalidasi kembali oleh `createRequestFinal_()` sebagai aksi STAFF.
+3. **Print Pengajuan (Staff)** tidak lagi menampilkan tombol `+ Pengajuan`. Hanya tombol Print yang tersedia di halaman cetak.
+
+### Penting saat deployment Apps Script
+
+Karena pesan `Aksi ini hanya dapat dilakukan oleh ADMIN` menunjukkan deployment Apps Script menggunakan versi kode authorization lama, ganti **seluruh isi** `Code.gs` dengan file `apps-script/Code.gs` dari paket ini, pastikan `SetupDatabase.gs` dari paket ini tetap ada, lalu **Deploy → Manage deployments → Edit → New version → Deploy**.
+
+Tidak perlu menjalankan `setupDatabase()` ulang dan tidak perlu mengganti API Key.
+
+### Pembagian file
+
+- Google Apps Script: `apps-script/Code.gs`, `apps-script/SetupDatabase.gs`
+- GitHub/Vercel: `index.html`, `styles.css`, `app.js`, `api/app.js`, dan file frontend pendukung
+- Secret tetap hanya di Vercel Environment Variables dan Apps Script Script Properties.
+
 ## Database
 
 Google Spreadsheet harus bernama `DATABASE_ATK` dan memiliki 14 sheet yang dibuat otomatis oleh `setupDatabase()`:
