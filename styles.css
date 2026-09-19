@@ -878,6 +878,8 @@ body::before {
 .dashboard-chip { display:inline-flex; align-items:center; padding:5px 9px; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-size:.68rem; font-weight:800; letter-spacing:.05em; }
 .usage-chart { display:grid; gap:8px; margin-top:4px; }
 .usage-row { display:grid; gap:4px; }
+.usage-product-name { min-width:0; }
+.usage-product-sku { color:#64748b; font-size:.67rem; margin-top:-1px; }
 .usage-label { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#475569; font-size:.70rem; }
 .usage-label strong { color:#0f172a; font-size:.70rem; }
 .usage-track { height:10px; overflow:hidden; border-radius:999px; background:#eef2ff; }

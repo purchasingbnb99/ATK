@@ -712,17 +712,23 @@
       }
     }
 
-    var usageMax = Math.max.apply(null, usage.map(function (x) { return Number(x.qty || 0); }).concat([1]));
-    var usageHtml = usage.map(function (x) {
+    // Dashboard utama menampilkan Top 10 barang berdasarkan total qty OUT selama 30 hari.
+    // Data berasal dari agregasi backend (bukan per tanggal), sehingga nama barang langsung terlihat.
+    var usageProducts = topUsed.slice(0, 10);
+    var usageMax = Math.max.apply(null, usageProducts.map(function (x) { return Number(x.qty || 0); }).concat([1]));
+    var usageHtml = usageProducts.map(function (x) {
       var qty = Number(x.qty || 0);
       var pct = Math.max(2, Math.round((qty / usageMax) * 100));
-      return '<div class="usage-row" title="' + escapeHtml(x.date) + ': ' + escapeHtml(number(qty)) + '">' +
-        '<div class="usage-label"><span>' + escapeHtml(x.label || x.date) + '</span><strong>' + escapeHtml(number(qty)) + '</strong></div>' +
+      var label = String(x.productName || x.sku || 'Barang');
+      var sku = String(x.sku || '');
+      return '<div class="usage-row" title="' + escapeHtml(label + (sku ? ' (' + sku + ')' : '') + ': ' + number(qty) + ' keluar') + '">' +
+        '<div class="usage-label"><span class="usage-product-name">' + escapeHtml(label) + '</span><strong>' + escapeHtml(number(qty)) + ' keluar</strong></div>' +
+        (sku ? '<div class="usage-product-sku">' + escapeHtml(sku) + '</div>' : '') +
         '<div class="usage-track"><span style="width:' + pct + '%"></span></div>' +
         '</div>';
     }).join('');
 
-    var topUsedHtml = topUsed.length ? topUsed.map(function (x) {
+    var topUsedHtml = topUsed.slice(0, 5).length ? topUsed.slice(0, 5).map(function (x) {
       return '<div class="top-use-row"><div><strong>' + escapeHtml(x.productName) + '</strong><span>' + escapeHtml(x.sku) + '</span></div><strong>' + escapeHtml(number(x.qty)) + ' keluar</strong></div>';
     }).join('') : '<div class="empty-cell">Belum ada pemakaian barang pada periode ini.</div>';
 
@@ -739,7 +745,7 @@
       '</div>' +
       '<div class="dashboard-grid dashboard-operations">' +
       '<div class="panel dashboard-chart-panel">' +
-        '<div class="panel-header"><div><h4 class="panel-title">Pemakaian Barang 30 Hari</h4><p class="panel-copy">Total barang keluar berdasarkan histori mutasi.</p></div><span class="dashboard-chip">OUT</span></div>' +
+        '<div class="panel-header"><div><h4 class="panel-title">Pemakaian Barang 30 Hari</h4><p class="panel-copy">Top 10 barang berdasarkan total qty keluar dalam 30 hari terakhir.</p></div><span class="dashboard-chip">OUT</span></div>' +
         '<div class="usage-chart">' + (usageHtml || '<div class="empty-cell">Belum ada histori pemakaian.</div>') + '</div>' +
       '</div>' +
       '<div class="panel dashboard-summary-panel">' +
