@@ -933,6 +933,16 @@ body::before {
 
 .staff-dashboard-note{margin-top:18px}.staff-dashboard-note .panel-copy{max-width:720px;line-height:1.6}
 
+/* Request form refinement: compact fields, clear read-only identity, and aligned date. */
+.request-identity-grid{display:grid;grid-template-columns:minmax(220px,300px) minmax(220px,300px) 1fr;gap:14px;align-items:start}
+.request-date-grid{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:14px;align-items:start}
+.request-items-stack{display:flex;flex-direction:column;gap:12px}
+.request-item-grid{display:grid;grid-template-columns:minmax(250px,380px) 110px minmax(220px,380px) auto;gap:14px;align-items:end;margin-bottom:6px}
+.request-remove-field{display:flex;flex-direction:column;justify-content:flex-end}
+.request-general-note{max-width:100%;margin-top:12px}
+.field-hint{font-weight:600;color:#64748b;font-size:.75rem}
+@media(max-width:760px){.request-identity-grid,.request-date-grid,.request-item-grid{grid-template-columns:1fr}.request-item-grid .request-remove-field{align-items:flex-start}}
+
 /* Request approval notification + search */
 .nav-item { position: relative; }
 .nav-label { min-width: 0; }
@@ -974,7 +984,7 @@ body::before {
 .select-all{display:inline-flex;align-items:center;gap:8px;font-size:.82rem;font-weight:800;color:var(--text);cursor:pointer}
 .select-all input,.frSelect{width:18px;height:18px;accent-color:#2563eb}
 .selected-print-area{position:absolute;left:-100000px;top:0;width:1000px;background:#fff;color:#111;padding:20px}
-.print-signature{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:28px;page-break-inside:avoid}.signature-box{min-height:120px;text-align:center}.signature-title{font-weight:700}.signature-space{height:72px}.signature-name{min-height:18px;font-weight:600;text-decoration:underline}.selected-print-area .print-signature{display:grid}
+.print-signature{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:28px;page-break-inside:avoid;width:100%}.signature-box{box-sizing:border-box;border:1px solid #777;min-height:135px;padding:12px;text-align:center}.signature-title{font-weight:700}.signature-space{height:82px}.signature-name{min-height:18px;font-weight:600}.selected-print-area .print-signature{display:grid}.print-general-note{border:1px solid #aaa;padding:8px;margin-top:10px;line-height:1.45}
 @media print{.print-signature{page-break-inside:avoid}}
 
 

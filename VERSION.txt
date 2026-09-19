@@ -1,2 +1,2 @@
-ATK Inventory V2.4
-Staff Print Pengajuan: 3 kolom tanda tangan (Dibuat oleh, Diketahui oleh, Disetujui oleh).
+ATK Inventory V2.5
+Request form compact layout, request-level note, and boxed 3-column print signatures.
