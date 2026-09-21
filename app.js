@@ -25,6 +25,8 @@
     productScanner: null,
     receiveScanner: null,
     poScanner: null,
+    opnameScanner: null,
+    activeOpnameId: '',
     approvalBadgeTimer: null,
     staffRequestCart: [],
     libraryPromises: { excel: null, scanner: null },
@@ -619,6 +621,7 @@
     stopFinalScanner();
     stopProductScanner();
     stopReceiveScanner();
+    stopOpnameScanner();
 
     var title = getPageTitle(action);
     setText('pageTitle', title);
@@ -1699,15 +1702,89 @@
 
   async function renderFinalAdjustment(content){
     await ensureMasterCaches();
-    content.innerHTML=pageHeaderBlock('Adjustment / Opname','Samakan stok sistem dengan stok fisik; setiap selisih dicatat sebagai movement.','')+
-      '<div class="panel narrow-panel"><form id="finalAdjustForm">'+
-      '<div class="form-group"><label>Barang</label><select id="faProduct" class="field" required>'+productOptions()+'</select></div>'+
-      '<div class="form-group"><label>Mode</label><select id="faMode" class="field"><option>ADJUSTMENT</option><option>OPNAME</option></select></div>'+
-      numberFieldFinal('faPhysical','Physical Stock',0)+
-      '<div class="form-group"><label>Tanggal</label><input id="faDate" class="field" type="date" value="'+todayFinal()+'" required></div>'+fieldFinal('faReason','Alasan','',500,true)+
-      '<div id="faMsg" class="form-message hidden"></div><button class="btn btn-primary">Simpan</button></form></div>';
+    var admin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';
+    if(!admin){showGlobalMessage('Modul ini hanya dapat digunakan oleh ADMIN.','error');return;}
+    var listResp=await apiFinal('listStockOpnames',{});
+    var sessions=listResp.data.sessions||[];
+    var active=sessions.find(function(x){return x.status==='BERJALAN';})||null;
+
+    content.innerHTML=pageHeaderBlock('Adjustment / Opname','Kelola adjustment manual dan Stock Opname berkala dengan scan barcode.','')+
+      '<div class="opname-tabs report-actions no-print"><button type="button" class="btn btn-primary" id="opTabManual">Adjustment Manual</button><button type="button" class="btn btn-secondary" id="opTabStock">Stock Opname</button></div>'+
+      '<div id="opManualPanel"></div><div id="opStockPanel" class="hidden"></div>';
+
+    renderFinalManualAdjustmentPanel(byIdFinal('opManualPanel'));
+    await renderFinalStockOpnamePanel(byIdFinal('opStockPanel'),active,sessions);
+    onFinal('opTabManual','click',function(){byIdFinal('opManualPanel').classList.remove('hidden');byIdFinal('opStockPanel').classList.add('hidden');byIdFinal('opTabManual').className='btn btn-primary';byIdFinal('opTabStock').className='btn btn-secondary';});
+    onFinal('opTabStock','click',function(){byIdFinal('opManualPanel').classList.add('hidden');byIdFinal('opStockPanel').classList.remove('hidden');byIdFinal('opTabManual').className='btn btn-secondary';byIdFinal('opTabStock').className='btn btn-primary';});
+  }
+
+  function renderFinalManualAdjustmentPanel(box){
+    box.innerHTML='<div class="panel narrow-panel"><form id="finalAdjustForm"><div class="form-group"><label>Barang</label><select id="faProduct" class="field" required>'+productOptions()+'</select></div><div class="form-group"><label>Mode</label><select id="faMode" class="field"><option>ADJUSTMENT</option><option>OPNAME</option></select></div>'+numberFieldFinal('faPhysical','Physical Stock',0)+'<div class="form-group"><label>Tanggal</label><input id="faDate" class="field" type="date" value="'+todayFinal()+'" required></div>'+fieldFinal('faReason','Alasan','',500,true)+'<div id="faMsg" class="form-message hidden"></div><button class="btn btn-primary">Simpan</button></form></div>';
     onFinal('faProduct','change',function(){var p=state.products.find(function(x){return String(x.productId)===String(valFinal('faProduct'));});if(p)byIdFinal('faPhysical').value=p.currentStock;});
-    onFinal('finalAdjustForm','submit',async function(e){e.preventDefault();var btn=this.querySelector('button'),box=byIdFinal('faMsg');setBtnFinal(btn,true,'Menyimpan...');try{await apiFinal('adjustStock',{productId:valFinal('faProduct'),physicalStock:valFinal('faPhysical'),mode:valFinal('faMode'),adjustmentDate:valFinal('faDate'),reason:valFinal('faReason')});messageFinal(box,'Transaksi berhasil disimpan.','success');showGlobalMessage('Stok sudah disesuaikan.','success');await refreshProductsFinal();}catch(err){messageFinal(box,friendlyFinal(err),'error');}finally{setBtnFinal(btn,false,'Simpan');}});
+    onFinal('finalAdjustForm','submit',async function(e){e.preventDefault();var btn=this.querySelector('button'),boxMsg=byIdFinal('faMsg');setBtnFinal(btn,true,'Menyimpan...');try{await apiFinal('adjustStock',{productId:valFinal('faProduct'),physicalStock:valFinal('faPhysical'),mode:valFinal('faMode'),adjustmentDate:valFinal('faDate'),reason:valFinal('faReason')});messageFinal(boxMsg,'Transaksi berhasil disimpan.','success');showGlobalMessage('Stok sudah disesuaikan.','success');await refreshProductsFinal();}catch(err){messageFinal(boxMsg,friendlyFinal(err),'error');}finally{setBtnFinal(btn,false,'Simpan');}});
+  }
+
+  async function renderFinalStockOpnamePanel(box,active,sessions){
+    var html='<div class="panel stock-opname-start-panel"><div class="panel-header"><div><h4 class="panel-title">Stock Opname</h4><p class="panel-copy">Bandingkan Stok Sistem (snapshot) dengan Stok Fisik. Scan tidak mengubah stok.</p></div><span class="badge '+(active?'warning':'success')+'">'+(active?'BERJALAN':'SIAP')+'</span></div>';
+    if(active){html+='<div class="info-strip"><strong>'+escFinal(active.opnameNo)+'</strong> · Tanggal '+escFinal(formatDateDisplayFinal(active.opnameDate))+' · Petugas '+escFinal(active.operatorName)+'</div><div id="opnameActive"></div>';}
+    else{html+='<form id="startOpnameForm" class="stock-opname-start-grid"><div class="form-group"><label>Tanggal Opname</label><input id="soDate" class="field" type="date" value="'+todayFinal()+'" required></div>'+fieldFinal('soNote','Catatan','',300,false)+'<div class="report-actions" style="align-self:end"><button class="btn btn-primary" type="submit">+ Mulai Stock Opname</button></div><div id="soMsg" class="form-message hidden"></div></form>';}
+    html+='</div><div class="panel"><div class="panel-header"><div><h4 class="panel-title">Riwayat Stock Opname</h4><p class="panel-copy">Sesi terbaru ditampilkan di atas.</p></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>No</th><th>Tanggal</th><th>Petugas</th><th>Status</th><th>Diperiksa</th><th>Selisih</th><th>Aksi</th></tr></thead><tbody>';
+    html+=sessions.length?sessions.map(function(s){return '<tr><td><strong>'+escFinal(s.opnameNo)+'</strong></td><td>'+escFinal(formatDateDisplayFinal(s.opnameDate))+'</td><td>'+escFinal(s.operatorName)+'</td><td>'+statusFinal(s.status)+'</td><td>'+fmtFinal(s.checkedCount)+' / '+fmtFinal(s.itemCount)+'</td><td>'+fmtFinal(s.varianceCount)+'</td><td><button class="btn btn-secondary btn-sm soView" data-id="'+escFinal(s.opnameId)+'">Lihat</button></td></tr>';}).join(''):emptyRowFinal(7,'Belum ada sesi Stock Opname.');
+    html+='</tbody></table></div></div>';
+    box.innerHTML=html;
+
+    if(active){
+      state.activeOpnameId=active.opnameId;
+      try{await renderActiveStockOpnameFinal(byIdFinal('opnameActive'),active);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}
+    }
+    else onFinal('startOpnameForm','submit',async function(e){
+      e.preventDefault();var btn=this.querySelector('button'),msg=byIdFinal('soMsg');setBtnFinal(btn,true,'Membuat...');
+      try{var r=await apiFinal('startStockOpname',{opnameDate:valFinal('soDate'),note:valFinal('soNote')});showGlobalMessage('Stock Opname '+r.data.session.opnameNo+' dimulai.','success');await renderPage('adjustStock');var tab=byIdFinal('opTabStock');if(tab)tab.click();}
+      catch(err){messageFinal(msg,friendlyFinal(err),'error');}finally{setBtnFinal(btn,false,'+ Mulai Stock Opname');}
+    });
+
+    document.querySelectorAll('.soView').forEach(function(b){b.onclick=async function(){try{var r=await apiFinal('getStockOpname',{opnameId:b.dataset.id});openStockOpnameViewFinal(r.data.session,r.data.items);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});
+  }
+
+  async function renderActiveStockOpnameFinal(box,session){
+    if(!box)return;
+    state.activeOpnameId=session.opnameId;
+    var r=await apiFinal('getStockOpname',{opnameId:session.opnameId});
+    var items=r.data.items||[];
+    box.innerHTML='<div class="stock-opname-workspace"><div class="stock-opname-scanner"><div id="opnameScannerArea" class="scanner-stage"></div><div class="report-actions"><button class="btn btn-primary" id="startOpnameScanner">Mulai Kamera</button><button class="btn btn-secondary" id="stopOpnameScanner">Stop Kamera</button></div>'+fieldFinal('opnameManualBarcode','Barcode Manual','',100,false)+'<button type="button" class="btn btn-secondary" id="opnameManualSearch">Cari</button><div id="opnameScannerMsg" class="form-message info">Kamera nonaktif.</div><div id="opnameScanResult" class="scan-result">Belum ada hasil.</div></div><div class="opname-summary-grid"><div><span>Total Item</span><strong id="soTotal">0</strong></div><div><span>Diperiksa</span><strong id="soChecked">0</strong></div><div><span>Selisih</span><strong id="soVariance">0</strong></div><div><span>Sudah Adjust</span><strong id="soAdjusted">0</strong></div></div><div id="opnameItemsPanel"></div><div class="report-actions no-print" style="margin-top:12px"><button class="btn btn-success" id="completeOpnameBtn">Selesaikan Stock Opname</button><button class="btn btn-secondary" id="printOpnameBtn">Print Laporan</button><button class="btn btn-secondary" id="exportOpnameBtn">Export Excel</button></div></div>';
+    await stopOpnameScanner();
+    renderStockOpnameItemsFinal(items,session);
+    onFinal('startOpnameScanner','click',startOpnameScannerFinal);
+    onFinal('stopOpnameScanner','click',stopOpnameScanner);
+    onFinal('opnameManualSearch','click',function(){lookupStockOpnameBarcodeFinal(valFinal('opnameManualBarcode'),session.opnameId);});
+    onFinal('completeOpnameBtn','click',async function(){try{if(!confirm('Selesaikan Stock Opname ini? Pastikan semua barang yang sudah discan memiliki stok fisik.'))return;var r=await apiFinal('completeStockOpname',{opnameId:session.opnameId});showGlobalMessage(r.data.session.opnameNo+' selesai.','success');await renderPage('adjustStock');var tab=byIdFinal('opTabStock');if(tab)tab.click();}catch(err){showGlobalMessage(friendlyFinal(err),'error');}});
+    onFinal('printOpnameBtn','click',function(){printStockOpnameFinal(session,items);});
+    onFinal('exportOpnameBtn','click',function(){exportExcelFinal('Stock-Opname-'+session.opnameNo,items.map(function(x){return {SKU:x.sku,Barcode:x.barcode,Barang:x.productName,Satuan:x.unit,'Stok Sistem (Snapshot)':x.systemStock,'Stok Fisik':x.physicalStock,Selisih:x.difference,Status:x.status,Adjustment:x.adjustmentQty,'No Adjustment':x.adjustmentNo};}));});
+  }
+
+  function renderStockOpnameItemsFinal(items,session){
+    var sorted=(items||[]).slice().sort(function(a,b){return String(a.sku).localeCompare(String(b.sku),'id',{numeric:true,sensitivity:'base'});});
+    var checked=sorted.filter(function(x){return x.physicalStock!=='';}).length;
+    var variance=sorted.filter(function(x){return x.difference!==''&&Number(x.difference||0)!==0;}).length;
+    var adjusted=sorted.filter(function(x){return ['SUDAH_DIADJUST','SESUAI_AKTUAL'].indexOf(String(x.status||''))>=0;}).length;
+    setTextFinal('soTotal',sorted.length);setTextFinal('soChecked',checked);setTextFinal('soVariance',variance);setTextFinal('soAdjusted',adjusted);
+    setHTMLFinal('opnameItemsPanel','<div class="panel"><div class="panel-header"><div><h4 class="panel-title">Hasil Stock Opname</h4><p class="panel-copy">Stok Sistem = snapshot saat barang pertama kali discan. Selisih = Stok Fisik - Stok Sistem.</p></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Stok Sistem<br><small>Snapshot</small></th><th>Stok Fisik</th><th>Selisih</th><th>Status</th><th class="no-print">Tindakan</th></tr></thead><tbody>'+(
+      sorted.length?sorted.map(function(x){var diff=Number(x.difference||0);var badge=diff===0&&x.physicalStock!==''?'<span class="badge success">SESUAI</span>':x.status==='SUDAH_DIADJUST'?'<span class="badge success">SUDAH DIADJUST</span>':x.status==='SESUAI_AKTUAL'?'<span class="badge info">SESUAI AKTUAL</span>':x.physicalStock===''?'<span class="badge warning">BELUM DIPERIKSA</span>':'<span class="badge danger">SELISIH</span>';var action=x.physicalStock!==''&&diff!==0&&x.status==='SELISIH'?'<button class="btn btn-primary btn-sm soAdjust" data-id="'+escFinal(x.opnameItemId)+'">Adjust '+(diff>0?'Tambah':'Kurang')+'</button>':'';return '<tr><td><strong>'+escFinal(x.sku)+'</strong><br><small>'+escFinal(x.barcode||'-')+'</small></td><td>'+escFinal(x.productName)+'<br><small>'+escFinal(x.unit)+'</small></td><td>'+fmtFinal(x.systemStock)+'</td><td><input class="field soPhysical" type="number" min="0" step="1" value="'+(x.physicalStock===''?'':escFinal(x.physicalStock))+'" data-id="'+escFinal(x.opnameItemId)+'" style="min-width:90px;width:110px"></td><td><strong>'+ (x.difference===''?'-':(diff>0?'+':'')+fmtFinal(diff)) +'</strong></td><td>'+badge+'</td><td class="no-print"><button class="btn btn-secondary btn-sm soSave" data-id="'+escFinal(x.opnameItemId)+'">Simpan</button>'+action+'</td></tr>';}).join(''):emptyRowFinal(7,'Belum ada barang yang discan.'))+'</tbody></table></div></div>');
+    document.querySelectorAll('.soSave').forEach(function(b){b.onclick=async function(){try{var inp=null;document.querySelectorAll('.soPhysical').forEach(function(el){if(String(el.dataset.id)===String(b.dataset.id))inp=el;});var v=inp?inp.value:'';await apiFinal('saveStockOpnamePhysical',{opnameId:session.opnameId,opnameItemId:b.dataset.id,physicalStock:v});showGlobalMessage('Stok fisik disimpan.','success');await renderStockOpnameItemsAfterFinal(session);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});
+    document.querySelectorAll('.soAdjust').forEach(function(b){b.onclick=async function(){try{if(!confirm('Sesuaikan stok barang ini ke jumlah fisik sekarang?'))return;var r=await apiFinal('adjustStockOpnameItem',{opnameId:session.opnameId,opnameItemId:b.dataset.id});showGlobalMessage(r.data.adjustment?r.data.adjustment.adjustmentNo+' berhasil dibuat.':'Stok sudah sesuai, tidak perlu adjustment.','success');await renderStockOpnameItemsAfterFinal(session);}catch(err){showGlobalMessage(friendlyFinal(err),'error');}};});
+  }
+
+  async function renderStockOpnameItemsAfterFinal(session){var r=await apiFinal('getStockOpname',{opnameId:session.opnameId});renderStockOpnameItemsFinal(r.data.items||[],r.data.session||session);}
+  async function lookupStockOpnameBarcodeFinal(code,opnameId){var clean=String(code||'').trim();if(!clean){messageFinal(byIdFinal('opnameScannerMsg'),'Barcode belum diisi.','warning');return;}setTextFinal('opnameScanResult',clean);try{var r=await apiFinal('scanStockOpnameItem',{opnameId:opnameId,barcode:clean});var x=r.data.item;messageFinal(byIdFinal('opnameScannerMsg'),'Barang ditemukan: '+x.sku+' — '+x.productName+'. Stok sistem: '+fmtFinal(x.systemStock)+' '+x.unit+'.'+(r.data.existing?' Barang sudah ada di sesi ini.':''),'success');await renderStockOpnameItemsAfterFinal({opnameId:opnameId});}catch(err){messageFinal(byIdFinal('opnameScannerMsg'),friendlyFinal(err),'error');}}
+  async function startOpnameScannerFinal(){try{await ensureScannerLibraryFinal();}catch(err){showGlobalMessage('Scanner tidak tersedia. Gunakan input manual.','warning');return;}if(state.opnameScanner)return;var msg=byIdFinal('opnameScannerMsg');try{state.opnameScanner=await createAndStartScannerFinal('opnameScannerArea',function(txt){setTextFinal('opnameScanResult',txt);lookupStockOpnameBarcodeFinal(txt,state.activeOpnameId||'');stopOpnameScanner();},function(){},{width:260,height:120});setScannerUiStateFinal('startOpnameScanner','stopOpnameScanner','opnameScannerMsg',true,'Kamera aktif. Arahkan ke barcode barang.');}catch(err){state.opnameScanner=null;messageFinal(msg,friendlyCameraErrorFinal(err),'error');setScannerUiStateFinal('startOpnameScanner','stopOpnameScanner','opnameScannerMsg',false,'Kamera nonaktif.');}}
+  async function stopOpnameScanner(){if(state.opnameScanner){try{await state.opnameScanner.stop();}catch(err){}try{state.opnameScanner.clear();}catch(err2){}state.opnameScanner=null;}setScannerUiStateFinal('startOpnameScanner','stopOpnameScanner','opnameScannerMsg',false,'Kamera nonaktif.');}
+  function openStockOpnameViewFinal(session,items){var body='<div class="info-strip"><strong>'+escFinal(session.opnameNo)+'</strong> · '+escFinal(formatDateDisplayFinal(session.opnameDate))+' · '+escFinal(session.operatorName)+' · '+escFinal(session.status)+'</div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Stok Sistem</th><th>Stok Fisik</th><th>Selisih</th><th>Status</th></tr></thead><tbody>'+((items||[]).length?items.map(function(x){var d=x.difference===''?'-':(Number(x.difference)>0?'+':'')+fmtFinal(x.difference);return '<tr><td>'+escFinal(x.sku)+'</td><td>'+escFinal(x.productName)+'</td><td>'+fmtFinal(x.systemStock)+'</td><td>'+ (x.physicalStock===''?'-':fmtFinal(x.physicalStock)) +'</td><td>'+d+'</td><td>'+escFinal(x.status)+'</td></tr>';}).join(''):emptyRowFinal(6,'Belum ada item.'))+'</tbody></table></div>';
+    openModalFinal('Laporan Stock Opname '+session.opnameNo,body,'<button class="btn btn-secondary" data-close-modal>Tutup</button><button class="btn btn-primary" id="modalPrintOpname">Print</button>');
+    onFinal('modalPrintOpname','click',function(){printStockOpnameFinal(session,items);});
+  }
+
+  function printStockOpnameFinal(session,items){var html='<div class="print-meta"><strong>Stock Opname '+escFinal(session.opnameNo)+'</strong><span>Tanggal: '+escFinal(formatDateDisplayFinal(session.opnameDate))+'<br>Petugas: '+escFinal(session.operatorName)+'<br>Status: '+escFinal(session.status)+'</span></div>'+'<table><thead><tr><th>SKU</th><th>Barang</th><th>Stok Sistem</th><th>Stok Fisik</th><th>Selisih</th><th>Status</th><th>Adjustment</th></tr></thead><tbody>'+((items||[]).length?items.map(function(x){var d=x.difference===''?'-':(Number(x.difference)>0?'+':'')+fmtFinal(x.difference);return '<tr><td>'+escFinal(x.sku)+'</td><td>'+escFinal(x.productName)+'</td><td>'+fmtFinal(x.systemStock)+'</td><td>'+ (x.physicalStock===''?'-':fmtFinal(x.physicalStock)) +'</td><td>'+d+'</td><td>'+escFinal(x.status)+'</td><td>'+escFinal(x.adjustmentNo||'-')+'</td></tr>';}).join(''):'<tr><td colspan="7">Belum ada item.</td></tr>')+'</tbody></table><div class="print-signature"><div class="signature-box"><div class="signature-title">Diperiksa</div><div class="signature-space"></div><div class="signature-name">'+escFinal(session.operatorName)+'</div></div><div class="signature-box"><div class="signature-title">Disetujui</div><div class="signature-space"></div><div class="signature-name">________________</div></div></div>';
+    var temp=document.createElement('div');temp.innerHTML=html;document.body.appendChild(temp);var id='tmpPrintOpname';temp.id=id;printHtmlFinal(id,'Laporan Stock Opname '+session.opnameNo);setTimeout(function(){if(temp&&temp.parentNode)temp.parentNode.removeChild(temp);},1000);
   }
 
   async function renderFinalMovements(content){
@@ -2138,7 +2215,7 @@ onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult',
   function messageFinal(e,m,t){if(!e)return;e.className='form-message '+(t||'error');e.textContent=String(m||'');e.classList.remove('hidden')}
   function friendlyFinal(e){return e&&e.message?String(e.message):'Terjadi kesalahan server.'}
   function openModalFinal(title,body,footer){closeModalFinal();var o=document.createElement('div');o.id='modalOverlay';o.className='modal-overlay';o.innerHTML='<div class="modal-card"><div class="modal-header"><h3>'+escFinal(title)+'</h3><button class="icon-btn" data-close-modal>×</button></div><div class="modal-body">'+body+'</div><div class="modal-footer" id="modalFooter">'+footer+'</div></div>';document.body.appendChild(o);o.querySelectorAll('[data-close-modal]').forEach(function(b){b.onclick=closeModalFinal;});o.addEventListener('click',function(e){if(e.target===o)closeModalFinal();});}
-  function closeModalFinal(){stopFinalScanner();stopProductScanner();stopReceiveScanner();stopPOScanner();var o=byIdFinal('modalOverlay');if(o)o.remove()}
+  function closeModalFinal(){stopFinalScanner();stopProductScanner();stopReceiveScanner();stopPOScanner();stopOpnameScanner();var o=byIdFinal('modalOverlay');if(o)o.remove()}
   function printHtmlFinal(id,title){
     var e=byIdFinal(id);
     if(!e){showGlobalMessage('Area cetak tidak ditemukan.','error');return;}

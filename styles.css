@@ -1042,3 +1042,17 @@ body::before {
     max-width: none;
   }
 }
+
+
+/* Stock Opname V3.0 */
+.stock-opname-start-panel { margin-bottom: 14px; }
+.stock-opname-start-grid { display:grid; grid-template-columns:minmax(170px,220px) minmax(260px,1fr) auto; gap:12px; align-items:end; }
+.stock-opname-workspace { display:flex; flex-direction:column; gap:14px; }
+.stock-opname-scanner { border:1px solid #e2e8f0; border-radius:14px; padding:14px; background:#fff; }
+.opname-summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.opname-summary-grid > div { padding:14px; border:1px solid #dbe4f0; border-radius:12px; background:#f8fafc; }
+.opname-summary-grid span { display:block; font-size:12px; color:#64748b; margin-bottom:4px; }
+.opname-summary-grid strong { display:block; font-size:24px; line-height:1.1; }
+.opname-tabs { margin-bottom:12px; }
+@media (max-width: 900px){ .stock-opname-start-grid{grid-template-columns:1fr;} .opname-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
+@media (max-width: 600px){ .opname-summary-grid{grid-template-columns:1fr 1fr;} .stock-opname-start-grid .report-actions{align-self:stretch!important;} .stock-opname-start-grid .report-actions .btn{width:100%;} }
