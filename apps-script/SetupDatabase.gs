@@ -17,7 +17,9 @@ var SHEETS = {
   PURCHASE_ITEMS: '11_PURCHASE_ITEMS',
   PURCHASE_RECEIPTS: '12_PURCHASE_RECEIPTS',
   PURCHASE_RECEIPT_ITEMS: '13_PURCHASE_RECEIPT_ITEMS',
-  APP_SETTINGS: '14_APP_SETTINGS'
+  APP_SETTINGS: '14_APP_SETTINGS',
+  STOCK_OPNAME_SESSIONS: '15_STOCK_OPNAME_SESSIONS',
+  STOCK_OPNAME_ITEMS: '16_STOCK_OPNAME_ITEMS'
 };
 
 var HEADERS = {
@@ -78,6 +80,16 @@ var HEADERS = {
   ],
   '14_APP_SETTINGS': [
     'settingKey', 'settingValue', 'description', 'updatedAt'
+  ],
+  '15_STOCK_OPNAME_SESSIONS': [
+    'opnameId', 'opnameNo', 'opnameDate', 'startedAt', 'completedAt',
+    'operatorId', 'operatorName', 'status', 'note'
+  ],
+  '16_STOCK_OPNAME_ITEMS': [
+    'opnameItemId', 'opnameId', 'productId', 'sku', 'barcode', 'productName',
+    'unit', 'systemStock', 'physicalStock', 'difference', 'status', 'adjustmentQty',
+    'adjustmentType', 'adjustmentId', 'adjustmentNo', 'adjustedAt', 'adjustedBy',
+    'note', 'createdAt', 'updatedAt'
   ]
 };
 

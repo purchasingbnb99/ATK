@@ -48,6 +48,13 @@ var ADMIN_ACTIONS = {
   stockReport: true,
   bulkUpsertProducts: true,
   updatePurchaseOrderStatus: true,
+  startStockOpname: true,
+  scanStockOpnameItem: true,
+  saveStockOpnamePhysical: true,
+  adjustStockOpnameItem: true,
+  completeStockOpname: true,
+  listStockOpnames: true,
+  getStockOpname: true,
   listUsers: true,
   saveUser: true
 };
@@ -539,6 +546,27 @@ function routeAction_(action, data, user) {
 
     case 'updatePurchaseOrderStatus':
       return updatePurchaseOrderStatusFinal_(data, user);
+
+    case 'startStockOpname':
+      return startStockOpnameFinal_(data, user);
+
+    case 'scanStockOpnameItem':
+      return scanStockOpnameItemFinal_(data, user);
+
+    case 'saveStockOpnamePhysical':
+      return saveStockOpnamePhysicalFinal_(data, user);
+
+    case 'adjustStockOpnameItem':
+      return adjustStockOpnameItemFinal_(data, user);
+
+    case 'completeStockOpname':
+      return completeStockOpnameFinal_(data, user);
+
+    case 'listStockOpnames':
+      return listStockOpnamesFinal_(data, user);
+
+    case 'getStockOpname':
+      return getStockOpnameFinal_(data, user);
 
     case 'listUsers':
       return listUsers_();
@@ -1929,6 +1957,342 @@ function adjustStockFinal_(data,user){
     appendObjectRow_(ms,HEADERS[SHEETS.STOCK_MOVEMENTS],mv);
     return {adjustment:adjustment,movement:mv,product:sanitizeProduct_(getObjectByRow_(ps,pr))};
   });
+}
+
+/* ============================ STOCK OPNAME V1 ============================ */
+
+function ensureStockOpnameSheetsFinal_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw createApiError_('SERVER_ERROR', 'Spreadsheet DATABASE_ATK tidak ditemukan.', 500);
+  var sessionName = SHEETS.STOCK_OPNAME_SESSIONS;
+  var itemName = SHEETS.STOCK_OPNAME_ITEMS;
+
+  if (!ss.getSheetByName(sessionName)) {
+    var sh = ss.insertSheet(sessionName);
+    sh.getRange(1, 1, 1, HEADERS[sessionName].length).setValues([HEADERS[sessionName]]);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, HEADERS[sessionName].length).setFontWeight('bold').setWrap(true);
+  }
+
+  if (!ss.getSheetByName(itemName)) {
+    var ih = ss.insertSheet(itemName);
+    ih.getRange(1, 1, 1, HEADERS[itemName].length).setValues([HEADERS[itemName]]);
+    ih.setFrozenRows(1);
+    ih.getRange(1, 1, 1, HEADERS[itemName].length).setFontWeight('bold').setWrap(true);
+  }
+}
+
+function stockOpnameStatusFinal_(status) {
+  var s = String(status || '').toUpperCase();
+  return s === 'SELESAI' ? 'SELESAI' : 'BERJALAN';
+}
+
+function sanitizeStockOpnameSessionFinal_(x) {
+  return {
+    opnameId: String(x.opnameId || ''),
+    opnameNo: String(x.opnameNo || ''),
+    opnameDate: dateOnlyFinal_(x.opnameDate) || String(x.opnameDate || ''),
+    startedAt: String(x.startedAt || ''),
+    completedAt: String(x.completedAt || ''),
+    operatorId: String(x.operatorId || ''),
+    operatorName: String(x.operatorName || ''),
+    status: stockOpnameStatusFinal_(x.status),
+    note: String(x.note || '')
+  };
+}
+
+function sanitizeStockOpnameItemFinal_(x) {
+  return {
+    opnameItemId: String(x.opnameItemId || ''),
+    opnameId: String(x.opnameId || ''),
+    productId: String(x.productId || ''),
+    sku: String(x.sku || ''),
+    barcode: String(x.barcode || ''),
+    productName: String(x.productName || ''),
+    unit: String(x.unit || ''),
+    systemStock: toNumber_(x.systemStock),
+    physicalStock: x.physicalStock === '' || x.physicalStock === null || x.physicalStock === undefined ? '' : toNumber_(x.physicalStock),
+    difference: x.difference === '' || x.difference === null || x.difference === undefined ? '' : toNumber_(x.difference),
+    status: String(x.status || 'BELUM_DIPERIKSA'),
+    adjustmentQty: x.adjustmentQty === '' || x.adjustmentQty === null || x.adjustmentQty === undefined ? '' : toNumber_(x.adjustmentQty),
+    adjustmentType: String(x.adjustmentType || ''),
+    adjustmentId: String(x.adjustmentId || ''),
+    adjustmentNo: String(x.adjustmentNo || ''),
+    adjustedAt: String(x.adjustedAt || ''),
+    adjustedBy: String(x.adjustedBy || ''),
+    note: String(x.note || ''),
+    createdAt: String(x.createdAt || ''),
+    updatedAt: String(x.updatedAt || '')
+  };
+}
+
+function findStockOpnameSessionFinal_(opnameId) {
+  ensureStockOpnameSheetsFinal_();
+  return rowObjectByIdFinal_(getSheet_(SHEETS.STOCK_OPNAME_SESSIONS), 'opnameId', opnameId);
+}
+
+function startStockOpnameFinal_(data, user) {
+  requireAdminFinal_(user);
+  return lockRun_(function () {
+    ensureStockOpnameSheetsFinal_();
+    var sheet = getSheet_(SHEETS.STOCK_OPNAME_SESSIONS);
+    var sessions = getRowsAsObjects_(sheet);
+    for (var i = 0; i < sessions.length; i++) {
+      if (stockOpnameStatusFinal_(sessions[i].status) === 'BERJALAN') {
+        throw createApiError_('CONFLICT', 'Masih ada Stock Opname yang berjalan: ' + String(sessions[i].opnameNo || sessions[i].opnameId), 409);
+      }
+    }
+
+    var now = nowIso_();
+    var opname = {
+      opnameId: Utilities.getUuid(),
+      opnameNo: nextDocumentNoFinal_('OPN'),
+      opnameDate: normalizeDateFinal_(data.opnameDate),
+      startedAt: now,
+      completedAt: '',
+      operatorId: String(user.userId || ''),
+      operatorName: String(user.name || user.username || ''),
+      status: 'BERJALAN',
+      note: String(data.note || '').trim()
+    };
+    appendObjectRow_(sheet, HEADERS[SHEETS.STOCK_OPNAME_SESSIONS], opname);
+    return {session: sanitizeStockOpnameSessionFinal_(opname), items: []};
+  });
+}
+
+function scanStockOpnameItemFinal_(data, user) {
+  requireAdminFinal_(user);
+  return lockRun_(function () {
+    ensureStockOpnameSheetsFinal_();
+    var opnameId = String(data.opnameId || '').trim();
+    var barcode = String(data.barcode || '').trim();
+    var productId = String(data.productId || '').trim();
+    if (!opnameId || (!barcode && !productId)) throw createApiError_('VALIDATION_ERROR', 'Sesi dan Barcode/Product wajib diisi.', 400);
+
+    var session = findStockOpnameSessionFinal_(opnameId);
+    if (!session) throw createApiError_('NOT_FOUND', 'Sesi Stock Opname tidak ditemukan.', 404);
+    if (stockOpnameStatusFinal_(session.status) !== 'BERJALAN') throw createApiError_('VALIDATION_ERROR', 'Stock Opname sudah selesai.', 400);
+
+    var products = getRowsAsObjects_(getSheet_(SHEETS.PRODUCTS));
+    var product = null;
+    for (var i = 0; i < products.length; i++) {
+      if (productId && String(products[i].productId) === productId) { product = products[i]; break; }
+      if (barcode && String(products[i].barcode || '').trim() === barcode) { product = products[i]; break; }
+    }
+    if (!product) throw createApiError_('NOT_FOUND', 'Barcode/barang belum terdaftar di Master Barang.', 404);
+    if (!toBoolean_(product.active)) throw createApiError_('VALIDATION_ERROR', 'Barang tidak aktif.', 400);
+
+    var itemSheet = getSheet_(SHEETS.STOCK_OPNAME_ITEMS);
+    var items = getRowsAsObjects_(itemSheet);
+    for (var j = 0; j < items.length; j++) {
+      if (String(items[j].opnameId) === opnameId && String(items[j].productId) === String(product.productId)) {
+        return {item: sanitizeStockOpnameItemFinal_(items[j]), existing: true};
+      }
+    }
+
+    var now = nowIso_();
+    var item = {
+      opnameItemId: Utilities.getUuid(),
+      opnameId: opnameId,
+      productId: String(product.productId),
+      sku: String(product.sku || ''),
+      barcode: String(product.barcode || ''),
+      productName: String(product.name || ''),
+      unit: String(product.unit || ''),
+      systemStock: toNumber_(product.currentStock),
+      physicalStock: '',
+      difference: '',
+      status: 'BELUM_DIPERIKSA',
+      adjustmentQty: '',
+      adjustmentType: '',
+      adjustmentId: '',
+      adjustmentNo: '',
+      adjustedAt: '',
+      adjustedBy: '',
+      note: '',
+      createdAt: now,
+      updatedAt: now
+    };
+    appendObjectRow_(itemSheet, HEADERS[SHEETS.STOCK_OPNAME_ITEMS], item);
+    return {item: sanitizeStockOpnameItemFinal_(item), existing: false};
+  });
+}
+
+function saveStockOpnamePhysicalFinal_(data, user) {
+  requireAdminFinal_(user);
+  return lockRun_(function () {
+    ensureStockOpnameSheetsFinal_();
+    var opnameId = String(data.opnameId || '').trim();
+    var opnameItemId = String(data.opnameItemId || '').trim();
+    var physical = Number(data.physicalStock);
+    if (!opnameId || !opnameItemId || !isFinite(physical) || physical < 0) throw createApiError_('VALIDATION_ERROR', 'Sesi, item, dan stok fisik valid wajib diisi.', 400);
+
+    var session = findStockOpnameSessionFinal_(opnameId);
+    if (!session || stockOpnameStatusFinal_(session.status) !== 'BERJALAN') throw createApiError_('VALIDATION_ERROR', 'Sesi Stock Opname tidak aktif.', 400);
+    var sheet = getSheet_(SHEETS.STOCK_OPNAME_ITEMS);
+    var row = findRowById_(sheet, 'opnameItemId', opnameItemId);
+    if (row < 0) throw createApiError_('NOT_FOUND', 'Item Stock Opname tidak ditemukan.', 404);
+    var item = getObjectByRow_(sheet, row);
+    if (String(item.opnameId) !== opnameId) throw createApiError_('VALIDATION_ERROR', 'Item tidak termasuk dalam sesi ini.', 400);
+    if (String(item.adjustmentId || '')) throw createApiError_('VALIDATION_ERROR', 'Item sudah di-adjust dan tidak dapat dihitung ulang.', 400);
+
+    var system = toNumber_(item.systemStock);
+    var diff = physical - system;
+    var now = nowIso_();
+    setFieldFinal_(sheet, row, 'physicalStock', physical);
+    setFieldFinal_(sheet, row, 'difference', diff);
+    setFieldFinal_(sheet, row, 'status', diff === 0 ? 'SESUAI' : 'SELISIH');
+    setFieldFinal_(sheet, row, 'updatedAt', now);
+    return {item: sanitizeStockOpnameItemFinal_(getObjectByRow_(sheet, row))};
+  });
+}
+
+function adjustStockOpnameItemFinal_(data, user) {
+  requireAdminFinal_(user);
+  return lockRun_(function () {
+    ensureStockOpnameSheetsFinal_();
+    var opnameId = String(data.opnameId || '').trim();
+    var opnameItemId = String(data.opnameItemId || '').trim();
+    if (!opnameId || !opnameItemId) throw createApiError_('VALIDATION_ERROR', 'Sesi dan item wajib diisi.', 400);
+
+    var session = findStockOpnameSessionFinal_(opnameId);
+    if (!session) throw createApiError_('NOT_FOUND', 'Sesi Stock Opname tidak ditemukan.', 404);
+    if (stockOpnameStatusFinal_(session.status) !== 'BERJALAN') throw createApiError_('VALIDATION_ERROR', 'Stock Opname sudah selesai.', 400);
+
+    var itemSheet = getSheet_(SHEETS.STOCK_OPNAME_ITEMS);
+    var itemRow = findRowById_(itemSheet, 'opnameItemId', opnameItemId);
+    if (itemRow < 0) throw createApiError_('NOT_FOUND', 'Item Stock Opname tidak ditemukan.', 404);
+    var item = getObjectByRow_(itemSheet, itemRow);
+    if (String(item.opnameId) !== opnameId) throw createApiError_('VALIDATION_ERROR', 'Item tidak termasuk dalam sesi ini.', 400);
+    var physical = Number(item.physicalStock);
+    if (!isFinite(physical) || physical < 0) throw createApiError_('VALIDATION_ERROR', 'Stok fisik belum diisi.', 400);
+    if (String(item.adjustmentId || '')) throw createApiError_('CONFLICT', 'Item sudah di-adjust sebelumnya.', 409);
+
+    var ps = getSheet_(SHEETS.PRODUCTS);
+    var pr = findRowById_(ps, 'productId', String(item.productId));
+    if (pr < 0) throw createApiError_('NOT_FOUND', 'Barang pada Master Barang tidak ditemukan.', 404);
+    var product = getObjectByRow_(ps, pr);
+    var currentStock = toNumber_(product.currentStock);
+    var delta = physical - currentStock;
+    var now = nowIso_();
+    var movementDate = dateOnlyFinal_(session.opnameDate) || normalizeDateFinal_(session.opnameDate);
+
+    if (delta === 0) {
+      setFieldFinal_(itemSheet, itemRow, 'adjustmentQty', 0);
+      setFieldFinal_(itemSheet, itemRow, 'adjustmentType', 'NONE');
+      setFieldFinal_(itemSheet, itemRow, 'adjustedAt', now);
+      setFieldFinal_(itemSheet, itemRow, 'adjustedBy', String(user.name || user.username || ''));
+      setFieldFinal_(itemSheet, itemRow, 'status', 'SESUAI_AKTUAL');
+      setFieldFinal_(itemSheet, itemRow, 'updatedAt', now);
+      return {item: sanitizeStockOpnameItemFinal_(getObjectByRow_(itemSheet, itemRow)), adjustment: null, movement: null};
+    }
+
+    var adjustmentId = Utilities.getUuid();
+    var adjustmentNo = nextDocumentNoFinal_('ADJ');
+    var type = delta > 0 ? 'ADJUSTMENT_PLUS' : 'ADJUSTMENT_MINUS';
+    var reason = 'Stock Opname ' + String(session.opnameNo || opnameId) + ': ' + String(data.note || 'Rekonsiliasi stok fisik').trim();
+    var adjustment = {
+      adjustmentId: adjustmentId,
+      adjustmentNo: adjustmentNo,
+      adjustmentDate: movementDate,
+      productId: String(item.productId),
+      sku: String(item.sku || product.sku || ''),
+      productName: String(item.productName || product.name || ''),
+      systemStock: currentStock,
+      physicalStock: physical,
+      difference: delta,
+      reason: reason,
+      createdBy: String(user.name || user.username || ''),
+      createdAt: now
+    };
+    appendObjectRow_(getSheet_(SHEETS.STOCK_ADJUSTMENTS), HEADERS[SHEETS.STOCK_ADJUSTMENTS], adjustment);
+
+    setFieldFinal_(ps, pr, 'currentStock', physical);
+    setFieldFinal_(ps, pr, 'updatedAt', now);
+
+    var movement = {
+      movementId: Utilities.getUuid(),
+      movementDate: movementDate,
+      productId: String(item.productId),
+      sku: String(item.sku || product.sku || ''),
+      productName: String(item.productName || product.name || ''),
+      type: 'ADJUSTMENT',
+      qty: delta,
+      stockBefore: currentStock,
+      stockAfter: physical,
+      referenceType: 'STOCK_OPNAME',
+      referenceId: String(opnameId),
+      userId: String(user.userId || ''),
+      userName: String(user.name || user.username || ''),
+      note: reason,
+      createdAt: now
+    };
+    appendObjectRow_(getSheet_(SHEETS.STOCK_MOVEMENTS), HEADERS[SHEETS.STOCK_MOVEMENTS], movement);
+
+    setFieldFinal_(itemSheet, itemRow, 'adjustmentQty', delta);
+    setFieldFinal_(itemSheet, itemRow, 'adjustmentType', type);
+    setFieldFinal_(itemSheet, itemRow, 'adjustmentId', adjustmentId);
+    setFieldFinal_(itemSheet, itemRow, 'adjustmentNo', adjustmentNo);
+    setFieldFinal_(itemSheet, itemRow, 'status', 'SUDAH_DIADJUST');
+    setFieldFinal_(itemSheet, itemRow, 'adjustedAt', now);
+    setFieldFinal_(itemSheet, itemRow, 'adjustedBy', String(user.name || user.username || ''));
+    setFieldFinal_(itemSheet, itemRow, 'updatedAt', now);
+
+    return {item: sanitizeStockOpnameItemFinal_(getObjectByRow_(itemSheet, itemRow)), adjustment: adjustment, movement: movement};
+  });
+}
+
+function completeStockOpnameFinal_(data, user) {
+  requireAdminFinal_(user);
+  return lockRun_(function () {
+    ensureStockOpnameSheetsFinal_();
+    var opnameId = String(data.opnameId || '').trim();
+    if (!opnameId) throw createApiError_('VALIDATION_ERROR', 'Sesi wajib diisi.', 400);
+    var sheet = getSheet_(SHEETS.STOCK_OPNAME_SESSIONS);
+    var row = findRowById_(sheet, 'opnameId', opnameId);
+    if (row < 0) throw createApiError_('NOT_FOUND', 'Sesi Stock Opname tidak ditemukan.', 404);
+    var session = getObjectByRow_(sheet, row);
+    if (stockOpnameStatusFinal_(session.status) !== 'BERJALAN') throw createApiError_('VALIDATION_ERROR', 'Sesi sudah selesai.', 400);
+    var items = getRowsAsObjects_(getSheet_(SHEETS.STOCK_OPNAME_ITEMS)).filter(function (x) { return String(x.opnameId) === opnameId; });
+    if (!items.length) throw createApiError_('VALIDATION_ERROR', 'Belum ada barang yang diperiksa pada sesi ini.', 400);
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].physicalStock === '' || items[i].physicalStock === null || items[i].physicalStock === undefined) {
+        throw createApiError_('VALIDATION_ERROR', 'Masih ada barang yang belum diisi stok fisiknya: ' + String(items[i].productName || items[i].sku), 400);
+      }
+    }
+    var now = nowIso_();
+    setFieldFinal_(sheet, row, 'status', 'SELESAI');
+    setFieldFinal_(sheet, row, 'completedAt', now);
+    return {session: sanitizeStockOpnameSessionFinal_(getObjectByRow_(sheet, row)), items: items.map(sanitizeStockOpnameItemFinal_)};
+  });
+}
+
+function listStockOpnamesFinal_(data, user) {
+  requireAdminFinal_(user);
+  ensureStockOpnameSheetsFinal_();
+  var sessions = getRowsAsObjects_(getSheet_(SHEETS.STOCK_OPNAME_SESSIONS)).map(sanitizeStockOpnameSessionFinal_);
+  var items = getRowsAsObjects_(getSheet_(SHEETS.STOCK_OPNAME_ITEMS));
+  sessions.forEach(function (s) {
+    var subset = items.filter(function (x) { return String(x.opnameId) === String(s.opnameId); });
+    s.itemCount = subset.length;
+    s.checkedCount = subset.filter(function (x) { return x.physicalStock !== '' && x.physicalStock !== null && x.physicalStock !== undefined; }).length;
+    s.varianceCount = subset.filter(function (x) { return x.difference !== '' && Number(x.difference || 0) !== 0; }).length;
+    s.adjustedCount = subset.filter(function (x) { return ['SUDAH_DIADJUST','SESUAI_AKTUAL'].indexOf(String(x.status || '')) >= 0; }).length;
+  });
+  sessions.sort(function (a, b) { return String(b.startedAt).localeCompare(String(a.startedAt)); });
+  return {sessions: sessions};
+}
+
+function getStockOpnameFinal_(data, user) {
+  requireAdminFinal_(user);
+  ensureStockOpnameSheetsFinal_();
+  var opnameId = String(data.opnameId || '').trim();
+  if (!opnameId) throw createApiError_('VALIDATION_ERROR', 'Sesi wajib diisi.', 400);
+  var session = findStockOpnameSessionFinal_(opnameId);
+  if (!session) throw createApiError_('NOT_FOUND', 'Sesi Stock Opname tidak ditemukan.', 404);
+  var items = getRowsAsObjects_(getSheet_(SHEETS.STOCK_OPNAME_ITEMS)).filter(function (x) { return String(x.opnameId) === opnameId; }).map(sanitizeStockOpnameItemFinal_);
+  items.sort(function (a, b) { return String(a.sku).localeCompare(String(b.sku), 'id', {numeric: true, sensitivity: 'base'}); });
+  return {session: sanitizeStockOpnameSessionFinal_(session), items: items};
 }
 
 function ensureRequestNoteColumn_(){
