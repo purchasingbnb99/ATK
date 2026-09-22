@@ -2441,6 +2441,36 @@
       else {var sku=String(r['SKU']||'').trim().toLowerCase(),bc=String(r['Barcode']||'').trim().toLowerCase(),name=String(r['Nama Barang']||'').trim(),cat=String(r['Kategori']||'').trim().toLowerCase(),unit=String(r['Satuan']||'').trim(),min=Number(r['Min']),max=Number(r['Max']),price=Number(r['Harga']),sup=String(r['Supplier']||'').trim().toLowerCase(),loc=String(r['Lokasi']||'').trim();if(!sku||!bc||!name||!cat||!unit||!isFinite(min)||min<0||!isFinite(max)||max<=min||!isFinite(price)||price<0||!sup||!loc)err('Data wajib, Min/Max, Harga, Kategori, Supplier, atau Lokasi tidak valid.');if(seen[sku])err('SKU duplicate di file.');if(seen[bc])err('Barcode duplicate di file.');seen[sku]=1;seen[bc]=1;if(state.categories&&!state.categories.some(function(x){return String(x.categoryName||'').trim().toLowerCase()===cat&&x.active;}))err('Kategori tidak ditemukan atau tidak aktif.');if(state.suppliers&&!state.suppliers.some(function(x){return (String(x.code||'').trim().toLowerCase()===sup||String(x.name||'').trim().toLowerCase()===sup)&&x.active;}))err('Supplier tidak ditemukan atau tidak aktif.');}
     });return {errors:errors};
   }
+  function importPreviewFinal(rows){
+    var keys=['SKU','Barcode','Nama Barang','Kategori','Satuan','Min','Max','Harga','Supplier','Lokasi'];
+    rows=Array.isArray(rows)?rows:[];
+    return '<div class="info-strip">'+fmtFinal(rows.length)+' baris ditemukan; preview maksimal 20.</div>' +
+      '<div class="table-wrap"><table class="data-table"><thead><tr>' +
+      keys.map(function(k){return '<th>'+escFinal(k)+'</th>';}).join('') +
+      '</tr></thead><tbody>' +
+      rows.slice(0,20).map(function(r){
+        return '<tr>'+keys.map(function(k){
+          var v=r[k];
+          if(v===undefined||v===null){
+            var lk=k.toLowerCase().replace(/[^a-z0-9]+/g,'');
+            Object.keys(r||{}).some(function(existing){
+              var ek=String(existing).toLowerCase().replace(/[^a-z0-9]+/g,'');
+              if(ek===lk){v=r[existing];return true;}
+              return false;
+            });
+          }
+          return '<td>'+escFinal(v===undefined||v===null?'':v)+'</td>';
+        }).join('')+'</tr>';
+      }).join('') +
+      '</tbody></table></div>';
+  }
+
+  function importResultFinal(d){
+    d=d||{};
+    return '<div class="kpi-row"><div class="kpi">Total<strong>'+fmtFinal(d.totalRows||0)+'</strong></div><div class="kpi">Dibuat<strong>'+fmtFinal(d.created||0)+'</strong></div><div class="kpi">Diperbarui<strong>'+fmtFinal(d.updated||0)+'</strong></div></div>' +
+      ((d.errors&&d.errors.length)?'<div class="table-wrap"><table class="data-table"><thead><tr><th>Baris</th><th>Error</th></tr></thead><tbody>'+d.errors.map(function(x){return '<tr><td>'+fmtFinal(x.row)+'</td><td>'+escFinal(x.message)+'</td></tr>';}).join('')+'</tbody></table></div>':'<div class="form-message success">Semua baris berhasil diproses.</div>');
+  }
+
   function masterImportPreviewFinal(rows,errors){var out='<div class="kpi-row"><div class="kpi">Baris<strong>'+fmtFinal((rows||[]).length)+'</strong></div><div class="kpi">Error<strong>'+fmtFinal((errors||[]).length)+'</strong></div></div>';if(errors&&errors.length){out+='<div class="table-wrap"><table class="data-table"><thead><tr><th>Baris</th><th>Masalah</th></tr></thead><tbody>'+errors.slice(0,100).map(function(e){return '<tr><td>'+fmtFinal(e.row)+'</td><td>'+escFinal(e.message)+'</td></tr>';}).join('')+'</tbody></table></div>';}out+='<div style="margin-top:12px">'+importPreviewFinal(rows)+'</div>';return out;}
   function importMasterResultFinal(d){return '<div class="kpi-row"><div class="kpi">Total Baris<strong>'+fmtFinal(d.totalRows||0)+'</strong></div><div class="kpi">Dibuat<strong>'+fmtFinal(d.created||0)+'</strong></div><div class="kpi">Diperbarui<strong>'+fmtFinal(d.updated||0)+'</strong></div></div>' + ((d.errors&&d.errors.length)?'<div class="form-message error">Ada baris yang ditolak.</div>':'<div class="form-message success">Semua data berhasil diproses.</div>');}
 
