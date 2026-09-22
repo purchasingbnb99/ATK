@@ -1,1 +1,2 @@
-3.6.0 — Tombol + Barang dipindahkan ke kolom Aksi baris terakhir dan sejajar dengan ikon hapus
+ATK Inventory - V3.7
+Layout refinement: wider Aksi column so 🗑 and + Barang are fully visible on the last row.
