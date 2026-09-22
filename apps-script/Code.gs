@@ -1157,7 +1157,9 @@ function validateProductInput_(data, currentProductId) {
   var location = normalizeText_(data.location, 150);
 
   validateTextLength_(sku, 'SKU', 1, 60);
-  validateTextLength_(barcode, 'Barcode', 1, 100);
+  if (barcode) {
+    validateTextLength_(barcode, 'Barcode', 1, 100);
+  }
   validateTextLength_(name, 'Nama Barang', 1, 200);
   validateTextLength_(categoryId, 'Kategori', 1, 80);
   validateTextLength_(unit, 'Satuan', 1, 40);
@@ -1202,7 +1204,7 @@ function ensureUniqueProductIdentifiers_(rows, sku, barcode, currentProductId) {
       );
     }
 
-    if (String(rows[i].barcode || '').trim().toLowerCase() === barcode.toLowerCase()) {
+    if (barcode && String(rows[i].barcode || '').trim().toLowerCase() === barcode.toLowerCase()) {
       throw createApiError_(
         'DUPLICATE',
         'Barcode sudah digunakan.',
@@ -2852,10 +2854,10 @@ function bulkUpsertProductsFinal_(data,user){
         var price=Number(firstValueFinal_(raw,['Harga','price','Price']));
         var supplier=String(firstValueFinal_(raw,['Supplier','supplier','supplierName','supplierCode'])||'').trim().toLowerCase();
         var loc=String(firstValueFinal_(raw,['Lokasi','location'])||'').trim();
-        if(!sku||!barcode||!name||!unit||!isFinite(min)||min<0||!isFinite(max)||max<=min||!isFinite(price)||price<0||!loc)throw new Error('Data wajib/Min-Max/Harga tidak valid.');
+        if(!sku||!name||!unit||!isFinite(min)||min<0||!isFinite(max)||max<=min||!isFinite(price)||price<0||!loc)throw new Error('Data wajib/Min-Max/Harga tidak valid.');
         if(seenSku[sku.toLowerCase()])throw new Error('SKU duplicate di file.');
-        if(seenBarcode[barcode.toLowerCase()])throw new Error('Barcode duplicate di file.');
-        seenSku[sku.toLowerCase()]=1;seenBarcode[barcode.toLowerCase()]=1;
+        if(barcode && seenBarcode[barcode.toLowerCase()])throw new Error('Barcode duplicate di file.');
+        seenSku[sku.toLowerCase()]=1;if(barcode)seenBarcode[barcode.toLowerCase()]=1;
         var c=cn[cat],sp=sk[supplier];
         if(!c||!toBoolean_(c.active))throw new Error('Kategori tidak ditemukan/tidak aktif.');
         if(!sp||!toBoolean_(sp.active))throw new Error('Supplier tidak ditemukan/tidak aktif.');
