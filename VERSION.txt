@@ -1,1 +1,1 @@
-ATK Inventory V3.3 - Request Form Add Button Placement
+3.5.0 — Compact grouped sidebar + Reorder notification badge

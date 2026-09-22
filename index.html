@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0f172a">
   <title>ATK Inventory</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=1.0.6-final-branding">
+  <link rel="stylesheet" href="styles.css?v=1.0.7-v3.5">
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -97,8 +97,12 @@
               <span id="sidebarRole">-</span>
             </div>
           </div>
-          <button id="closeSidebarButton" class="icon-btn mobile-only" type="button"
-            aria-label="Tutup menu">×</button>
+          <div style="display:flex;align-items:center;gap:6px">
+            <button id="sidebarCollapseButton" class="icon-btn sidebar-collapse-btn" type="button"
+              aria-label="Perkecil menu" title="Perkecil menu">‹</button>
+            <button id="closeSidebarButton" class="icon-btn mobile-only" type="button"
+              aria-label="Tutup menu">×</button>
+          </div>
         </div>
 
         <nav id="mainNav" class="nav-list"></nav>
@@ -151,6 +155,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=1.0.6-final-branding" defer></script>
+  <script src="app.js?v=1.0.7-v3.5" defer></script>
 </body>
 </html>

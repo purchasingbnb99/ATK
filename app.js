@@ -1,6 +1,6 @@
 /**
  * ATK Inventory - Frontend
- * ATK Inventory - FINAL / Mobile Ready
+ * ATK Inventory - FINAL / Mobile Ready / V3.5 Navigation + Reorder Alert
  *
  * Browser frontend. Never place Apps Script URL/API key here.
  */
@@ -28,6 +28,7 @@
     opnameScanner: null,
     activeOpnameId: '',
     approvalBadgeTimer: null,
+    reorderBadgeTimer: null,
     staffRequestCart: [],
     libraryPromises: { excel: null, scanner: null },
     masterCacheAt: 0,
@@ -108,11 +109,44 @@
     var menuButton = document.getElementById('menuButton');
     if (menuButton) menuButton.addEventListener('click', openSidebar);
 
+    var sidebarCollapseButton = document.getElementById('sidebarCollapseButton');
+    if (sidebarCollapseButton) sidebarCollapseButton.addEventListener('click', toggleSidebarCompact);
+    window.addEventListener('resize', restoreSidebarCompact);
+
     var closeSidebarButton = document.getElementById('closeSidebarButton');
     if (closeSidebarButton) closeSidebarButton.addEventListener('click', closeSidebar);
 
     var overlay = document.getElementById('sidebarOverlay');
     if (overlay) overlay.addEventListener('click', closeSidebar);
+  }
+
+  function toggleSidebarCompact() {
+    var sidebar = document.getElementById('sidebar');
+    var mainView = document.getElementById('mainView');
+    if (!sidebar || !mainView) return;
+    var compact = !sidebar.classList.contains('collapsed-desktop');
+    sidebar.classList.toggle('collapsed-desktop', compact);
+    mainView.classList.toggle('sidebar-is-collapsed', compact);
+    try { window.localStorage.setItem('atk_sidebar_compact', compact ? '1' : '0'); } catch (err) {}
+    var btn = document.getElementById('sidebarCollapseButton');
+    if (btn) { btn.textContent = compact ? '›' : '‹'; btn.setAttribute('aria-label', compact ? 'Perluas menu' : 'Perkecil menu'); btn.title = compact ? 'Perluas menu' : 'Perkecil menu'; }
+  }
+
+  function restoreSidebarCompact() {
+    var compact = false;
+    try { compact = window.localStorage.getItem('atk_sidebar_compact') === '1'; } catch (err) {}
+    var sidebar = document.getElementById('sidebar');
+    var mainView = document.getElementById('mainView');
+    if (!sidebar || !mainView) return;
+    if (window.innerWidth <= 820) {
+      sidebar.classList.remove('collapsed-desktop');
+      mainView.classList.remove('sidebar-is-collapsed');
+      return;
+    }
+    sidebar.classList.toggle('collapsed-desktop', compact);
+    mainView.classList.toggle('sidebar-is-collapsed', compact);
+    var btn = document.getElementById('sidebarCollapseButton');
+    if (btn) { btn.textContent = compact ? '›' : '‹'; btn.setAttribute('aria-label', compact ? 'Perluas menu' : 'Perkecil menu'); btn.title = compact ? 'Perluas menu' : 'Perkecil menu'; }
   }
 
   function showStaffEntry() {
@@ -308,6 +342,7 @@
 
   async function handleLogout() {
     if (state.approvalBadgeTimer) { window.clearInterval(state.approvalBadgeTimer); state.approvalBadgeTimer = null; }
+    if (state.reorderBadgeTimer) { window.clearInterval(state.reorderBadgeTimer); state.reorderBadgeTimer = null; }
     stopFinalScanner();
     stopProductScanner();
     stopReceiveScanner();
@@ -517,8 +552,10 @@
 
     applyUserIdentity();
     buildNavigation();
+    restoreSidebarCompact();
     renderPage('dashboard');
     startApprovalBadgePolling();
+    startReorderBadgePolling();
     setConnectionStatus('online');
   }
 
@@ -538,6 +575,26 @@
     setText('topUserInitial', initial);
   }
 
+  function getNavSectionStateKey(role) {
+    return 'atk_nav_sections_' + String(role || '').toUpperCase();
+  }
+
+  function loadNavSectionState(role) {
+    var defaults = { utama: true, master: true, persediaan: true, barang: true, pengadaan: true, pengajuan: true, laporan: true, tools: false, akun: true };
+    try {
+      var raw = window.localStorage.getItem(getNavSectionStateKey(role));
+      if (!raw) return defaults;
+      var parsed = JSON.parse(raw);
+      return Object.assign(defaults, parsed || {});
+    } catch (err) {
+      return defaults;
+    }
+  }
+
+  function saveNavSectionState(role, stateMap) {
+    try { window.localStorage.setItem(getNavSectionStateKey(role), JSON.stringify(stateMap)); } catch (err) {}
+  }
+
   function buildNavigation() {
     var nav = document.getElementById('mainNav');
     if (!nav) return;
@@ -546,37 +603,73 @@
 
     var role = String(state.user && state.user.role || '').toUpperCase();
     var items = NAV_ITEMS[role] || [];
-    var currentSection = '';
+    var sectionState = loadNavSectionState(role);
+    var groups = {};
+    var order = [];
 
-    for (var i = 0; i < items.length; i++) {
-      var item = items[i];
+    items.forEach(function (item) {
+      if (!groups[item.section]) { groups[item.section] = []; order.push(item.section); }
+      groups[item.section].push(item);
+    });
 
-      if (item.section !== currentSection) {
-        currentSection = item.section;
+    order.forEach(function (sectionKey) {
+      var group = document.createElement('div');
+      group.className = 'nav-group nav-group-' + String(sectionKey).replace(/[^a-zA-Z0-9_-]/g, '-');
 
+      var isMain = sectionKey === 'utama';
+      var isOpen = sectionState[sectionKey] !== false;
+      if (isMain) isOpen = true;
+      group.classList.toggle('collapsed', !isOpen);
+
+      if (!isMain) {
+        var header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'nav-section-toggle';
+        header.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+        header.setAttribute('title', 'Buka/tutup ' + (SECTION_LABELS[sectionKey] || sectionKey));
+        header.innerHTML = '<span class="nav-section-label-text">' + escapeHtml(SECTION_LABELS[sectionKey] || sectionKey) + '</span><span class="nav-section-chevron">⌄</span>';
+        header.addEventListener('click', function () {
+          var nowOpen = !group.classList.contains('collapsed');
+          group.classList.toggle('collapsed', nowOpen);
+          header.setAttribute('aria-expanded', nowOpen ? 'false' : 'true');
+          sectionState[sectionKey] = !nowOpen;
+          saveNavSectionState(role, sectionState);
+        });
+        group.appendChild(header);
+      } else {
         var section = document.createElement('div');
-        section.className = 'nav-section-label';
-        section.textContent = SECTION_LABELS[currentSection] || currentSection;
-        nav.appendChild(section);
+        section.className = 'nav-section-label nav-section-label-main';
+        section.textContent = SECTION_LABELS[sectionKey] || sectionKey;
+        group.appendChild(section);
       }
 
-      var button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'nav-item nav-action-' + String(item.action).replace(/[^a-zA-Z0-9_-]/g, '-');
-      button.setAttribute('data-action', item.action);
-      button.innerHTML =
-        '<span class="nav-icon">' + escapeHtml(item.icon) + '</span>' +
-        '<span class="nav-label">' + escapeHtml(item.label) + '</span>' +
-        (item.action === 'listRequests' && role === 'ADMIN' ? '<span class="nav-pending-badge hidden" id="approvalPendingBadge">0</span>' : '');
+      var itemsWrap = document.createElement('div');
+      itemsWrap.className = 'nav-group-items';
 
-      button.addEventListener('click', function () {
-        state.activePage = this.getAttribute('data-action') || 'dashboard';
-        renderPage(state.activePage);
-        closeSidebar();
+      groups[sectionKey].forEach(function (item) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'nav-item nav-action-' + String(item.action).replace(/[^a-zA-Z0-9_-]/g, '-');
+        button.setAttribute('data-action', item.action);
+        button.setAttribute('title', item.label);
+        button.innerHTML =
+          '<span class="nav-icon">' + escapeHtml(item.icon) + '</span>' +
+          '<span class="nav-label">' + escapeHtml(item.label) + '</span>' +
+          (item.action === 'listRequests' && role === 'ADMIN' ? '<span class="nav-pending-badge hidden" id="approvalPendingBadge">0</span>' : '') +
+          (item.action === 'reorderRecommendations' && role === 'ADMIN' ? '<span class="nav-reorder-badge hidden" id="reorderPendingBadge">0</span>' : '');
+
+        button.addEventListener('click', function () {
+          state.activePage = this.getAttribute('data-action') || 'dashboard';
+          renderPage(state.activePage);
+          closeSidebar();
+        });
+
+        itemsWrap.appendChild(button);
       });
 
-      nav.appendChild(button);
-    }
+      group.appendChild(itemsWrap);
+      nav.appendChild(group);
+    });
 
     updateActiveNavigation();
   }
@@ -609,13 +702,51 @@
     state.approvalBadgeTimer = window.setInterval(refreshApprovalBadge, 30000);
   }
 
+  async function refreshReorderBadge() {
+    if (!state.user || String(state.user.role || '').toUpperCase() !== 'ADMIN') return;
+    var badge = document.getElementById('reorderPendingBadge');
+    if (!badge) return;
+    try {
+      var result = await apiRequest('reorderRecommendations', {});
+      var items = result.data && Array.isArray(result.data.items) ? result.data.items : [];
+      var count = items.filter(function (x) { return Number(x && x.recommendedQty || 0) > 0; }).length;
+      badge.textContent = String(count);
+      badge.classList.toggle('hidden', count <= 0);
+      badge.setAttribute('aria-label', count + ' barang membutuhkan pemesanan');
+    } catch (err) {
+      // Notification is informative only; never block navigation.
+    }
+  }
+
+  function startReorderBadgePolling() {
+    if (state.reorderBadgeTimer) {
+      window.clearInterval(state.reorderBadgeTimer);
+      state.reorderBadgeTimer = null;
+    }
+    if (!state.user || String(state.user.role || '').toUpperCase() !== 'ADMIN') return;
+    refreshReorderBadge();
+    state.reorderBadgeTimer = window.setInterval(refreshReorderBadge, 60000);
+  }
+
   function updateActiveNavigation() {
     var buttons = document.querySelectorAll('.nav-item');
-
     for (var i = 0; i < buttons.length; i++) {
       var active = buttons[i].getAttribute('data-action') === state.activePage;
       if (active) buttons[i].classList.add('active');
       else buttons[i].classList.remove('active');
+      if (active) {
+        var group = buttons[i].closest('.nav-group');
+        if (group && group.classList.contains('collapsed')) {
+          group.classList.remove('collapsed');
+          var toggle = group.querySelector('.nav-section-toggle');
+          if (toggle) {
+            toggle.setAttribute('aria-expanded','true');
+            var role = String(state.user && state.user.role || '').toUpperCase();
+            var sectionKey = (group.className.match(/nav-group-([a-zA-Z0-9_-]+)/)||[])[1];
+            if (sectionKey) { var sm=loadNavSectionState(role); sm[sectionKey]=true; saveNavSectionState(role,sm); }
+          }
+        }
+      }
     }
   }
 
@@ -1999,7 +2130,9 @@
   async function renderFinalReorder(content){
     var r=await apiFinal('reorderRecommendations',{});
     state.reorderFinal=r.data.items||[];
-    content.innerHTML=pageHeaderBlock('Rekomendasi Order','Recommended Qty dihitung otomatis. Order Qty dapat disesuaikan oleh Admin.','<div class="report-actions"><button class="btn btn-secondary" id="frPrintReorder">Print / Cetak</button></div>')+
+    var actionableReorders=state.reorderFinal.filter(function(x){return Number(x.recommendedQty||0)>0;}).length;
+    var reorderNotice=actionableReorders>0?'<div class="reorder-alert" role="status"><span class="reorder-alert-icon">⚠</span><div><strong>'+escFinal(String(actionableReorders))+' barang perlu segera diorder</strong><span>Periksa Recommended Qty dan sesuaikan Order Qty sebelum membuat PO.</span></div></div>':'<div class="reorder-alert reorder-alert-ok" role="status"><span class="reorder-alert-icon">✓</span><div><strong>Tidak ada barang yang membutuhkan order saat ini</strong><span>Recommended Qty = 0 untuk seluruh item yang dipantau.</span></div></div>';
+    content.innerHTML=pageHeaderBlock('Rekomendasi Order','Recommended Qty dihitung otomatis. Order Qty dapat disesuaikan oleh Admin.','<div class="report-actions"><button class="btn btn-secondary" id="frPrintReorder">Print / Cetak</button></div>')+reorderNotice+
       '<div class="panel"><div id="reorderPrintArea"><div class="print-meta"><strong>Rekomendasi Order</strong><span>Dicetak: '+escFinal(nowJakartaFinal())+'</span></div>'+
       '<div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Stok</th><th>Min</th><th>Max</th><th>Outstanding</th><th>Recommended</th><th>Order Qty</th><th>Harga</th><th class="no-print">Aksi</th></tr></thead><tbody>'+
       (state.reorderFinal.length?state.reorderFinal.map(function(x){
