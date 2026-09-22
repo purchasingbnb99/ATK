@@ -2177,9 +2177,8 @@
 
   function openPOFinal(prefill){
     var sup=activeSupplierOptions();
-    openModalFinal('Buat Purchase Order','<form id="finalPOForm"><div class="form-grid"><div class="form-group"><label>Supplier</label><select id="fpoSupplier" class="field" required><option value="">Pilih</option>'+sup+'</select></div>'+fieldDateFinal('fpoDate','Tanggal Order')+'</div><div class="po-scan-toolbar"><button type="button" class="btn btn-secondary" id="fpoScanButton">▦ Scan Barcode Barang</button><button type="button" class="btn btn-ghost" id="fpoStartScanner">Mulai Kamera</button><button type="button" class="btn btn-ghost" id="fpoStopScanner">Stop</button></div><div id="fpoScannerPanel" class="inline-scanner hidden"><div id="fpoScannerArea" class="scanner-stage compact"></div><div id="fpoScannerMsg" class="form-message hidden"></div></div><div class="po-items-header"><div>Barang</div><div>Qty</div><div>Harga PO</div><div>Aksi</div></div><div id="fpoItems"></div><button type="button" class="btn btn-secondary" id="addFPOItem">+ Item</button><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="finalPOForm">Buat PO</button>',{dismissOnBackdrop:false});
+    openModalFinal('Buat Purchase Order','<form id="finalPOForm"><div class="form-grid"><div class="form-group"><label>Supplier</label><select id="fpoSupplier" class="field" required><option value="">Pilih</option>'+sup+'</select></div>'+fieldDateFinal('fpoDate','Tanggal Order')+'</div><div class="po-scan-toolbar"><button type="button" class="btn btn-secondary" id="fpoScanButton">▦ Scan Barcode Barang</button><button type="button" class="btn btn-ghost" id="fpoStartScanner">Mulai Kamera</button><button type="button" class="btn btn-ghost" id="fpoStopScanner">Stop</button></div><div id="fpoScannerPanel" class="inline-scanner hidden"><div id="fpoScannerArea" class="scanner-stage compact"></div><div id="fpoScannerMsg" class="form-message hidden"></div></div><div class="po-items-header"><div>Barang</div><div>Qty</div><div>Harga PO</div><div>Aksi</div></div><div id="fpoItems" class="po-items-stack"></div><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="finalPOForm">Buat PO</button>',{dismissOnBackdrop:false});
     if(prefill){byIdFinal('fpoSupplier').value=prefill.supplierId||'';addFPOItem(prefill);}else addFPOItem();
-    onFinal('addFPOItem','click',function(){addFPOItem();});
     onFinal('fpoScanButton','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});
     onFinal('fpoStartScanner','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});
     onFinal('fpoStopScanner','click',stopPOScanner);
@@ -2243,13 +2242,32 @@
     return true;
   }
 
+  function updateFPOAddButtonFinal(){
+    var c=byIdFinal('fpoItems');
+    if(!c)return;
+    c.querySelectorAll('.fpo-add-inline').forEach(function(b){b.remove();});
+    var rows=Array.prototype.slice.call(c.querySelectorAll('.fpo-row'));
+    if(!rows.length)return;
+    var last=rows[rows.length-1];
+    var action=last.querySelector('.po-remove-cell');
+    if(!action)return;
+    var add=document.createElement('button');
+    add.type='button';
+    add.className='btn btn-secondary btn-sm fpo-add-inline';
+    add.title='Tambah item';
+    add.setAttribute('aria-label','Tambah item');
+    add.textContent='+ Item';
+    add.onclick=function(){addFPOItem();};
+    action.appendChild(add);
+  }
+
   function addFPOItem(prefill){
     var c=byIdFinal('fpoItems'),r=document.createElement('div');
     r.className='po-item-grid fpo-row';
-    r.innerHTML='<div class="form-group"><select class="field fpo-product" required>'+productOptions()+'</select></div>'+
-      '<div class="form-group"><input class="field fpo-qty" type="number" min="1" step="1" value="'+escFinal(prefill&&prefill.orderQty!==undefined?prefill.orderQty:(prefill&&prefill.recommendedQty!==undefined?prefill.recommendedQty:1))+'" required></div>'+
-      '<div class="form-group"><input class="field fpo-price" type="number" min="0" step="0.01" value="'+escFinal(prefill&&prefill.price!==undefined?prefill.price:0)+'" required></div>'+
-      '<div class="form-group po-remove-cell"><button type="button" class="btn btn-danger btn-sm fpo-remove">Hapus</button></div>';
+    r.innerHTML='<div class="form-group po-product-cell"><select class="field fpo-product" required>'+productOptions()+'</select></div>'+
+      '<div class="form-group po-qty-cell"><input class="field fpo-qty" type="number" min="1" step="1" value="'+escFinal(prefill&&prefill.orderQty!==undefined?prefill.orderQty:(prefill&&prefill.recommendedQty!==undefined?prefill.recommendedQty:1))+'" required></div>'+
+      '<div class="form-group po-price-cell"><input class="field fpo-price" type="number" min="0" step="0.01" value="'+escFinal(prefill&&prefill.price!==undefined?prefill.price:0)+'" required></div>'+
+      '<div class="form-group po-remove-cell"><button type="button" class="btn btn-danger btn-sm fpo-remove" title="Hapus item" aria-label="Hapus item">🗑</button></div>';
     c.appendChild(r);
     if(prefill)r.querySelector('.fpo-product').value=prefill.productId||'';
     if(!prefill)fillPOPriceFromMasterFinal(r);
@@ -2260,7 +2278,12 @@
       var p=getPOProductFinal(this.value),sup=byIdFinal('fpoSupplier');
       if(p&&p.supplierId&&sup&&!sup.value)sup.value=String(p.supplierId);
     });
-    r.querySelector('.fpo-remove').onclick=function(){r.remove();};
+    r.querySelector('.fpo-remove').onclick=function(){
+      r.remove();
+      if(!c.querySelector('.fpo-row'))addFPOItem();
+      updateFPOAddButtonFinal();
+    };
+    updateFPOAddButtonFinal();
   }
 
 

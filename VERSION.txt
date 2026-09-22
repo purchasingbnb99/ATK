@@ -1,2 +1,2 @@
-ATK Inventory - V3.7
-Layout refinement: wider Aksi column so 🗑 and + Barang are fully visible on the last row.
+ATK Inventory - V3.8
+Purchase Order layout refinement: move + Item beside the trash/delete action on the last PO item row, keep the action controls aligned, and remove the bottom + Item button.
