@@ -950,23 +950,23 @@ body::before {
 
 .staff-dashboard-note{margin-top:18px}.staff-dashboard-note .panel-copy{max-width:720px;line-height:1.6}
 
-/* Request form refinement: compact fields and a single aligned row: Tanggal - Barang - Qty - Catatan Item - Hapus. */
-.request-identity-grid{display:grid;grid-template-columns:minmax(220px,300px) minmax(220px,300px) 1fr;gap:14px;align-items:start}
-.request-items-head,.request-item-grid{display:grid;grid-template-columns:150px minmax(250px,1.45fr) 90px minmax(220px,1fr) 78px;gap:10px;align-items:end}
+/* Request form refinement: request-level date on top; item rows stay compact and horizontal. */
+.request-identity-grid{display:grid;grid-template-columns:minmax(220px,300px) minmax(220px,300px) minmax(180px,230px);gap:14px;align-items:end}
+.request-items-head,.request-item-grid{display:grid;grid-template-columns:minmax(250px,1.45fr) 90px minmax(220px,1fr) 58px;gap:10px;align-items:end}
 .request-items-head{margin:2px 0 6px;padding:0 2px;color:var(--text);font-size:.76rem;font-weight:800}
 .request-action-head{display:flex;align-items:center;justify-content:space-between;gap:6px}.request-action-head .request-add-btn{white-space:nowrap;padding:6px 8px;min-height:32px;font-size:.7rem}.request-add-mobile{display:none;margin-top:8px}.request-add-mobile .btn{width:auto}
 .request-items-stack{display:flex;flex-direction:column;gap:8px}
 .request-item-grid{margin-bottom:0}
 .request-item-grid .form-group{margin-bottom:0}
 .request-item-grid .form-group>label{display:none}
-.request-date-field .field,.request-item-grid .field{width:100%}
-.request-date-spacer{min-height:46px}
-.request-remove-field{display:flex;flex-direction:column;justify-content:flex-end}
-.request-remove-field .btn{width:100%;padding:8px 10px;min-height:40px}
+.request-date-top .field,.request-item-grid .field{width:100%}
+.request-date-top{max-width:230px}
+.request-remove-field{display:flex;flex-direction:column;justify-content:flex-end;align-items:center}
+.request-remove-field .btn{width:42px;height:40px;padding:0;min-height:40px;font-size:1.05rem;line-height:1;display:grid;place-items:center}
 .request-general-note{max-width:100%;margin-top:12px}
 .field-hint{font-weight:600;color:#64748b;font-size:.75rem}
-@media(max-width:900px){.request-items-head,.request-item-grid{grid-template-columns:130px minmax(220px,1.3fr) 80px minmax(180px,1fr) 72px;gap:8px}}
-@media(max-width:760px){.request-identity-grid,.request-item-grid{grid-template-columns:1fr}.request-items-head{display:none}.request-add-mobile{display:block}.request-date-spacer{display:none}.request-item-grid .request-remove-field{align-items:flex-start}.request-remove-field .btn{width:auto}.request-item-grid .form-group>label{display:block}}
+@media(max-width:900px){.request-items-head,.request-item-grid{grid-template-columns:minmax(220px,1.3fr) 80px minmax(180px,1fr) 54px;gap:8px}.request-identity-grid{grid-template-columns:minmax(190px,260px) minmax(190px,260px) minmax(170px,210px)}}
+@media(max-width:760px){.request-identity-grid,.request-item-grid{grid-template-columns:1fr}.request-items-head{display:none}.request-add-mobile{display:block;margin-top:8px;margin-bottom:8px}.request-date-top{max-width:none}.request-item-grid .request-remove-field{align-items:flex-start}.request-remove-field .btn{width:42px}.request-item-grid .form-group>label{display:block}}
 
 /* Request approval notification + search */
 .nav-item { position: relative; }

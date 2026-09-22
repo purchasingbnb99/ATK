@@ -1959,8 +1959,8 @@
     var prefillItems=(state.staffRequestCart||[]).map(function(x){return {productId:String(x.productId||''),qtyRequested:Number(x.qtyRequested||1),note:String(x.note||'')};});
     content.innerHTML=pageHeaderBlock('Buat Pengajuan','Pengajuan tidak mengurangi stok sampai Admin melakukan approval.','')+
       '<div class="panel">'+
-      '<div class="request-identity-grid"><div class="form-group"><label>Nama Staff</label><input class="field readonly-field" value="'+escFinal(staffName)+'" readonly title="Diisi otomatis dan tidak dapat diedit"></div><div class="form-group"><label>Departemen</label><input class="field readonly-field" value="'+escFinal(department||'General')+'" readonly title="Diisi otomatis dan tidak dapat diedit"></div></div>'+ 
-      '<div class="request-items-head"><div>Tanggal</div><div>Barang</div><div>Qty</div><div>Catatan Item</div><div class="request-action-head"><span>Aksi</span><button type="button" class="btn btn-secondary btn-sm request-add-btn" id="addFinalReqItem">+ Barang</button></div></div><div id="finalReqItems" class="request-items-stack"></div><div class="request-add-mobile"><button type="button" class="btn btn-secondary btn-sm" id="addFinalReqItemMobile">+ Barang</button></div><form id="finalCreateReqForm" style="margin-top:16px"><div class="form-group request-general-note"><label>Catatan Umum <span class="field-hint">(akan tampil pada cetakan)</span></label><textarea id="fcrNote" class="field" maxlength="500" placeholder="Keterangan umum pengajuan, misalnya tujuan/kebutuhan barang."></textarea></div><div id="fcrMsg" class="form-message hidden"></div><button class="btn btn-primary" type="submit">Kirim Pengajuan</button></form></div>';
+      '<div class="request-identity-grid"><div class="form-group"><label>Nama Staff</label><input class="field readonly-field" value="'+escFinal(staffName)+'" readonly title="Diisi otomatis dan tidak dapat diedit"></div><div class="form-group"><label>Departemen</label><input class="field readonly-field" value="'+escFinal(department||'General')+'" readonly title="Diisi otomatis dan tidak dapat diedit"></div><div class="form-group request-date-top"><label>Tanggal</label><input id="fcrDate" class="field" type="date" value="'+todayFinal()+'" required></div></div>'+ 
+      '<div class="request-items-head"><div>Barang</div><div>Qty</div><div>Catatan Item</div><div class="request-action-head"><span>Aksi</span><button type="button" class="btn btn-secondary btn-sm request-add-btn" id="addFinalReqItem">+ Barang</button></div></div><div class="request-add-mobile"><button type="button" class="btn btn-secondary btn-sm" id="addFinalReqItemMobile">+ Barang</button></div><div id="finalReqItems" class="request-items-stack"></div><form id="finalCreateReqForm" style="margin-top:16px"><div class="form-group request-general-note"><label>Catatan Umum <span class="field-hint">(akan tampil pada cetakan)</span></label><textarea id="fcrNote" class="field" maxlength="500" placeholder="Keterangan umum pengajuan, misalnya tujuan/kebutuhan barang."></textarea></div><div id="fcrMsg" class="form-message hidden"></div><button class="btn btn-primary" type="submit">Kirim Pengajuan</button></form></div>';
     if(prefillItems.length){prefillItems.forEach(function(x){addFinalReqRow(x);});}
     else addFinalReqRow();
     onFinal('addFinalReqItem','click',function(){addFinalReqRow();});
@@ -1986,16 +1986,13 @@
   function addFinalReqRow(prefill){
     var c=byIdFinal('finalReqItems'),r=document.createElement('div');
     r.className='request-item-grid fcr-row';
-    var isFirst=!c.querySelector('.fcr-row');
-    r.innerHTML=(isFirst?'<div class="form-group request-date-field"><input id="fcrDate" class="field" type="date" value="'+todayFinal()+'" required></div>':'<div class="request-date-spacer" aria-hidden="true"></div>')+
-      '<div class="form-group"><select class="field fcr-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fcr-qty','Qty',prefill?Number(prefill.qtyRequested||1):1)+
-      '<div class="form-group"><input class="field fcr-note" maxlength="300" placeholder="Catatan untuk barang ini" value="'+(prefill?escFinal(prefill.note||''):'')+'"></div><div class="form-group request-remove-field"><button type="button" class="btn btn-danger btn-sm fcr-remove">Hapus</button></div>';
+    r.innerHTML='<div class="form-group"><select class="field fcr-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fcr-qty','Qty',prefill?Number(prefill.qtyRequested||1):1)+
+      '<div class="form-group"><input class="field fcr-note" maxlength="300" placeholder="Catatan untuk barang ini" value="'+(prefill?escFinal(prefill.note||''):'')+'"></div><div class="form-group request-remove-field"><button type="button" class="btn btn-danger btn-sm fcr-remove" title="Hapus barang" aria-label="Hapus barang">🗑</button></div>';
     c.appendChild(r);
     if(prefill){r.querySelector('.fcr-product').value=String(prefill.productId||'');}
     r.querySelector('.fcr-remove').onclick=function(){
-      var savedDate=valFinal('fcrDate')||todayFinal();r.remove();var first=c.querySelector('.fcr-row');
-      if(first&&!byIdFinal('fcrDate')){var cell=first.querySelector('.request-date-spacer');if(cell){cell.className='form-group request-date-field';cell.innerHTML='<input id="fcrDate" class="field" type="date" value="'+escFinal(savedDate)+'" required>';}}
-      if(!first)addFinalReqRow();
+      r.remove();
+      if(!c.querySelector('.fcr-row'))addFinalReqRow();
     };
   }
 
