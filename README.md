@@ -1,3 +1,7 @@
+# ATK Inventory — Scanner V2.8
+
+Perubahan V2.8: status kamera sekarang menampilkan "Kamera aktif" saat berjalan dan "Kamera nonaktif" setelah Stop Kamera, serta tombol Mulai/Stop mengikuti status kamera.
+
 # ATK Inventory — FINAL Mobile UI + Barcode
 
 ## Arsitektur
@@ -310,6 +314,49 @@ Admin tetap menggunakan login username/password. Staff tidak menggunakan passwor
 
 Pencarian Barang Staff memuat daftar barang aktif satu kali lalu memfilter langsung di browser setiap ketikan, sehingga input 1 huruf dapat langsung menampilkan hasil tanpa request per karakter.
 
-## V2.1.1 Print Timestamp Fix
-- Print Pengajuan shows `Dibuat` (original request timestamp) and `Dicetak` (current Asia/Jakarta timestamp).
-- Existing request data is not modified.
+## V2.7 Scanner Staff
+- Scanner Staff kini dapat menambahkan barang hasil scan ke pengajuan sementara.
+- Scan barcode yang sama menambah Qty 1.
+- Tombol Ajukan Barang Ini membuka form pengajuan dengan barang sudah terpilih.
+- Multi-barang dapat dikumpulkan lalu dilanjutkan ke Buat Pengajuan.
+- Scanner tidak memotong stok; stok hanya berubah setelah Admin melakukan approval.
+
+
+## V2.9
+- Approval Pengajuan menampilkan Keterangan Tolak di tabel Admin.
+- Login screen memiliki footer branding: BNB Application ATK © 2026 | Developed by Purchasing B&b.
+
+
+## V3.0 - Stock Opname Admin
+
+Menambahkan Stock Opname berkala untuk Admin tanpa menghapus Adjustment Manual.
+
+Alur: mulai sesi -> scan barcode/manual -> simpan snapshot Stok Sistem -> isi Stok Fisik -> lihat Selisih -> Adjust Tambah/Kurang bila diperlukan -> selesaikan sesi.
+
+Rumus: `Selisih = Stok Fisik - Stok Sistem (snapshot)`.
+
+Stock Opname tidak mengubah stok saat scan atau input fisik. Adjustment dilakukan hanya saat Admin menekan tombol Adjust. Adjustment dicatat ke `07_STOCK_ADJUSTMENTS` dan `06_STOCK_MOVEMENTS` dengan referensi `STOCK_OPNAME`.
+
+Untuk menjaga integritas bila ada transaksi lain setelah scan, adjustment menyamakan `Current Stock` saat aksi dilakukan dengan `Stok Fisik`. Snapshot hasil opname tetap disimpan pada `16_STOCK_OPNAME_ITEMS`.
+
+Sheet baru: `15_STOCK_OPNAME_SESSIONS` dan `16_STOCK_OPNAME_ITEMS`. Keduanya dibuat otomatis saat fitur pertama kali digunakan; database lama tidak perlu diinisialisasi ulang.
+
+
+## V3.1 - Signed Qty Histori Mutasi
+
+Penyempurnaan tampilan Histori Mutasi dan Laporan Mutasi: nilai Qty positif ditampilkan dengan tanda `+` (mis. `+20`, `+1`), sedangkan nilai negatif tetap `-1`. Data numerik di database tidak diubah; perubahan hanya pada presentasi frontend.
+
+
+## V3.6 — Navigation & Reorder Notification
+
+Perubahan frontend: sidebar Admin/Staff sekarang menggunakan grup menu yang dapat dibuka/tutup, tersedia mode sidebar compact pada desktop, dan menu **Rekomendasi Order** memiliki badge notifikasi jumlah barang yang memiliki Recommended Qty > 0. Halaman Reorder juga menampilkan pemberitahuan kebutuhan order. Tidak ada perubahan schema database pada versi ini.
+
+## V4.0 — Reset Data Percobaan
+
+Versi ini menambahkan fitur Admin **Reset Semua Data** untuk membersihkan seluruh data percobaan sebelum data sebenarnya dimasukkan. Fitur menghapus data Master Barang, Kategori, Supplier, transaksi stok, pengajuan, PO, penerimaan, Stock Opname, serta seluruh user selain Admin yang sedang digunakan. Akun Admin aktif dipertahankan agar aplikasi tetap dapat diakses. Sequence nomor dokumen direset ke awal.
+
+**PENTING:** buat backup Spreadsheet sebelum reset. Fitur reset bersifat permanen dan tidak boleh dijalankan setelah data produksi mulai digunakan.
+
+
+## V4.1 — Master Data Import/Export
+Admin sekarang dapat Import/Export massal untuk Master Barang, Kategori, dan Supplier melalui menu Tools → Import/Export Master atau tombol Import/Export pada masing-masing halaman Master. Import menggunakan preview dan validasi sebelum commit. Urutan yang disarankan adalah Kategori → Supplier → Master Barang. Import Master Barang tidak mengubah Current Stock; data baru selalu mulai dari 0. User tetap tidak dapat diimport secara massal untuk menjaga keamanan password/session. Export Master Barang menampilkan Current Stock sebagai informasi saja; nilai stok tidak pernah diimport kembali.

@@ -33,6 +33,9 @@
     libraryPromises: { excel: null, scanner: null },
     masterCacheAt: 0,
     masterCachePromise: null,
+    masterTransferType: 'products',
+    pendingMasterImport: [],
+    pendingMasterImportErrors: [],
     caches: {
       categories: [],
       suppliers: [],
@@ -57,8 +60,8 @@
       { label: 'Penerimaan PO', icon: '✓', action: 'receivePurchaseOrder', section: 'pengadaan' },
       { label: 'Approval Pengajuan', icon: '✓', action: 'listRequests', section: 'pengajuan' },
       { label: 'Laporan', icon: '▥', action: 'stockReport', section: 'laporan' },
-      { label: 'Import Excel', icon: '⇧', action: 'bulkUpsertProducts', section: 'tools' },
       { label: 'Export Excel', icon: '⇩', action: 'exportExcel', section: 'tools' },
+      { label: 'Import/Export Master', icon: '⇅', action: 'masterDataTransfer', section: 'tools' },
       { label: 'Reset Data', icon: '⚠', action: 'resetAllData', section: 'tools' },
       { label: 'Change Password', icon: '⚿', action: 'changePassword', section: 'akun' }
     ],
@@ -808,6 +811,8 @@
         await renderFinalReports(content);
       } else if (action === 'bulkUpsertProducts') {
         await renderFinalImport(content);
+      } else if (action === 'masterDataTransfer') {
+        await renderMasterDataTransferFinal(content);
       } else if (action === 'exportExcel') {
         await renderFinalExport(content);
       } else if (action === 'printRequests') {
@@ -916,7 +921,7 @@
       pageHeaderBlock(
         'Kategori',
         'Kelola kategori barang. Nama kategori harus unik.',
-        '<button class="btn btn-primary" type="button" id="addCategoryButton">+ Tambah Kategori</button>'
+        '<div class="report-actions"><button class="btn btn-secondary" type="button" id="categoryTransferButton">Import/Export</button><button class="btn btn-primary" type="button" id="addCategoryButton">+ Tambah Kategori</button></div>'
       ) +
       '<div class="panel">' +
       tableToolbar('categorySearch', 'Cari kategori...') +
@@ -950,6 +955,9 @@
   }
 
   function bindCategoryEvents() {
+    var transfer = document.getElementById('categoryTransferButton');
+    if (transfer) transfer.addEventListener('click', function(){ state.masterTransferType='categories'; state.activePage='masterDataTransfer'; renderPage('masterDataTransfer'); });
+
     var add = document.getElementById('addCategoryButton');
     if (add) {
       add.addEventListener('click', function () {
@@ -1041,7 +1049,7 @@
       pageHeaderBlock(
         'Supplier',
         'Kelola data supplier. Kode supplier harus unik.',
-        '<button class="btn btn-primary" type="button" id="addSupplierButton">+ Tambah Supplier</button>'
+        '<div class="report-actions"><button class="btn btn-secondary" type="button" id="supplierTransferButton">Import/Export</button><button class="btn btn-primary" type="button" id="addSupplierButton">+ Tambah Supplier</button></div>'
       ) +
       '<div class="panel">' +
       tableToolbar('supplierSearch', 'Cari kode, nama, PIC, telepon...') +
@@ -1049,6 +1057,9 @@
       '<thead><tr><th>Kode</th><th>Nama</th><th>PIC</th><th>Telepon</th><th>Email</th><th>Status</th><th>Aksi</th></tr></thead>' +
       '<tbody id="supplierTableBody">' + renderSupplierRows(state.caches.suppliers) + '</tbody>' +
       '</table></div></div>';
+
+    var transfer = document.getElementById('supplierTransferButton');
+    if (transfer) transfer.addEventListener('click', function(){ state.masterTransferType='suppliers'; state.activePage='masterDataTransfer'; renderPage('masterDataTransfer'); });
 
     var add = document.getElementById('addSupplierButton');
     if (add) add.addEventListener('click', function () { openSupplierModal(null); });
@@ -1178,7 +1189,7 @@
       pageHeaderBlock(
         'Master Barang',
         'Kelola SKU, barcode, kategori, supplier, min/max stock, harga, dan lokasi. Current Stock tidak diedit dari sini.',
-        '<button class="btn btn-primary" type="button" id="addProductButton">+ Tambah Barang</button>'
+        '<div class="report-actions"><button class="btn btn-secondary" type="button" id="productTransferButton">Import/Export</button><button class="btn btn-primary" type="button" id="addProductButton">+ Tambah Barang</button></div>'
       ) +
       '<div class="panel">' +
       tableToolbar('productSearch', 'Cari SKU, barcode, nama barang...') +
@@ -1187,6 +1198,7 @@
       '<tbody id="productTableBody">' + renderProductRows(state.caches.products) + '</tbody>' +
       '</table></div></div>';
 
+    document.getElementById('productTransferButton').addEventListener('click', function () { state.masterTransferType='products'; state.activePage='masterDataTransfer'; renderPage('masterDataTransfer'); });
     document.getElementById('addProductButton').addEventListener('click', function () {
       openProductModal(null);
     });
@@ -2385,6 +2397,53 @@
   function updateReportTabFinal(type){document.querySelectorAll('.report-tab').forEach(function(b){var active=b.dataset.type===String(type);b.classList.toggle('active',active);b.classList.toggle('btn-primary',active);b.classList.toggle('btn-secondary',!active);});}
   function setValueFinal(id,value){var e=byIdFinal(id);if(e)e.value=value;}
 
+  function masterTransferSchemaFinal(type){
+    if(type==='categories') return {label:'Kategori',headers:['Nama Kategori'],required:['Nama Kategori'],action:'bulkUpsertCategories',template:{'Nama Kategori':'Alat Tulis'}};
+    if(type==='suppliers') return {label:'Supplier',headers:['Kode','Nama','PIC','Telepon','Email','Alamat'],required:['Kode','Nama'],action:'bulkUpsertSuppliers',template:{'Kode':'SUP-001','Nama':'Supplier Baru','PIC':'PIC Supplier','Telepon':'08123456789','Email':'supplier@example.com','Alamat':'Alamat supplier'}};
+    return {label:'Master Barang',headers:['SKU','Barcode','Nama Barang','Kategori','Satuan','Min','Max','Harga','Supplier','Lokasi'],required:['SKU','Barcode','Nama Barang','Kategori','Satuan','Min','Max','Harga','Supplier','Lokasi'],action:'bulkUpsertProducts',template:{'SKU':'ATK-001','Barcode':'899000000001','Nama Barang':'Pulpen','Kategori':state.categories&&state.categories[0]?state.categories[0].categoryName:'Alat Tulis','Satuan':'pcs','Min':5,'Max':20,'Harga':3000,'Supplier':state.suppliers&&state.suppliers[0]?state.suppliers[0].code:'SUP-001','Lokasi':'Gudang ATK'}};
+  }
+  function transferTypeLabelFinal(type){return masterTransferSchemaFinal(type).label;}
+  function startMasterTransferFinal(type){state.masterTransferType=type;renderMasterDataTransferFinal(document.getElementById('pageContent'));}
+  async function renderMasterDataTransferFinal(content){
+    await ensureMasterCaches();
+    try{await ensureExcelLibraryFinal();}catch(err){showGlobalMessage('Library Excel tidak tersedia. Import/Export tidak dapat digunakan.','warning');}
+    var type=state.masterTransferType||'products',schema=masterTransferSchemaFinal(type);
+    var tabHtml=['products','categories','suppliers'].map(function(t){var active=t===type?' btn-primary':' btn-secondary';return '<button type="button" class="btn'+active+' master-transfer-tab" data-type="'+t+'">'+escFinal(transferTypeLabelFinal(t))+'</button>';}).join('');
+    content.innerHTML=headingFinal('Import / Export Master Data','Import atau export data Master secara massal. Import selalu divalidasi terlebih dahulu dan tidak mengubah Current Stock.','')+
+      '<div class="panel"><div class="report-actions master-transfer-tabs">'+tabHtml+'</div><div class="info-strip" style="margin-top:12px"><strong>'+escFinal(schema.label)+'</strong> · '+escFinal(schema.action==='bulkUpsertProducts'?'Import memperbarui Master Barang tanpa mengubah Current Stock. Data barang baru selalu dimulai dari stok 0.':'Import akan membuat data baru atau memperbarui data dengan identitas yang sama.')+'<br><strong>Urutan yang disarankan:</strong> Kategori → Supplier → Master Barang.</div>'+
+      '<div class="panel-header" style="margin-top:14px"><div><h4 class="panel-title">Import</h4><p class="panel-copy">File Excel harus mengikuti template. Data belum disimpan sampai semua validasi lolos.</p></div><div class="report-actions"><button type="button" class="btn btn-secondary" id="mdTemplate">Template '+escFinal(schema.label)+'</button><button type="button" class="btn btn-secondary" id="mdExport">Export '+escFinal(schema.label)+'</button></div></div>'+
+      '<input id="mdFile" class="field" type="file" accept=".xlsx,.xls,.csv" style="margin-top:8px">'+
+      '<div id="mdPreview" style="margin-top:14px"></div><div id="mdMsg" class="form-message hidden"></div>'+
+      '<div class="report-actions no-print" style="margin-top:14px"><button type="button" class="btn btn-primary" id="mdCommit" disabled>Import '+escFinal(schema.label)+'</button></div></div>';
+    state.pendingMasterImport=[];state.pendingMasterImportErrors=[];
+    document.querySelectorAll('.master-transfer-tab').forEach(function(b){b.onclick=function(){startMasterTransferFinal(b.dataset.type);};});
+    onFinal('mdTemplate','click',function(){exportExcelFinal('Template-'+schema.label.replace(/[^A-Za-z0-9]+/g,'-'),[schema.template]);});
+    onFinal('mdExport','click',async function(){try{
+      if(type==='categories'){var r=await apiFinal('listCategories',{});exportExcelFinal('Master-Kategori',(r.data.items||[]).map(function(x){return {'Nama Kategori':x.categoryName,'Status':x.active?'Aktif':'Nonaktif'};}));}
+      else if(type==='suppliers'){var r=await apiFinal('listSuppliers',{});exportExcelFinal('Master-Supplier',(r.data.items||[]).map(function(x){return {Kode:x.code,Nama:x.name,PIC:x.pic||'',Telepon:x.phone||'',Email:x.email||'',Alamat:x.address||'',Status:x.active?'Aktif':'Nonaktif'};}));}
+      else {var r=await apiFinal('listProducts',{includeInactive:true});exportExcelFinal('Master-Barang',(r.data.items||[]).map(function(x){var cat=findCacheName(state.caches.categories,'categoryId',x.categoryId,'categoryName');var sup=findCacheName(state.caches.suppliers,'supplierId',x.supplierId,'name');return {SKU:x.sku,Barcode:x.barcode,'Nama Barang':x.name,Kategori:cat,Satuan:x.unit,Min:x.minStock,Max:x.maxStock,Harga:x.price,Supplier:sup,Lokasi:x.location,'Stok Saat Ini':x.currentStock,Status:x.active?'Aktif':'Nonaktif'};}));}
+    }catch(err){showGlobalMessage(friendlyFinal(err),'error');}});
+    onFinal('mdFile','change',async function(){
+      var file=this.files&&this.files[0];var commit=byIdFinal('mdCommit');if(!file)return;commit.disabled=true;setHTMLFinal('mdPreview','');state.pendingMasterImport=[];state.pendingMasterImportErrors=[];
+      try{await ensureExcelLibraryFinal();var wb=XLSX.read(await file.arrayBuffer(),{type:'array'}),sheet=wb.Sheets[wb.SheetNames[0]],rows=XLSX.utils.sheet_to_json(sheet,{defval:''}),headerRows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''}),headers=(headerRows[0]||[]).map(function(x){return String(x).trim();}),missing=schema.required.filter(function(h){return headers.indexOf(h)<0;});
+        if(missing.length){state.pendingMasterImportErrors=[{row:1,message:'Header kurang: '+missing.join(', ')}];setHTMLFinal('mdPreview',masterImportPreviewFinal(rows,state.pendingMasterImportErrors));messageFinal(byIdFinal('mdMsg'),'Header file tidak sesuai template.','error');return;}
+        var validation=validateMasterImportRowsFinal(type,rows);state.pendingMasterImport=rows;state.pendingMasterImportErrors=validation.errors;setHTMLFinal('mdPreview',masterImportPreviewFinal(rows,validation.errors));
+        if(validation.errors.length){messageFinal(byIdFinal('mdMsg'),'Perbaiki semua error pada preview sebelum import.','error');commit.disabled=true;}else{messageFinal(byIdFinal('mdMsg'),'Semua baris lolos validasi awal. Data siap diimport.','success');commit.disabled=!rows.length;}
+      }catch(err){messageFinal(byIdFinal('mdMsg'),'File tidak dapat dibaca: '+friendlyFinal(err),'error');}
+    });
+    onFinal('mdCommit','click',async function(){var b=this;setBtnFinal(b,true,'Memproses...');try{var r=await apiFinal(schema.action,{rows:state.pendingMasterImport||[]});if(r.data&&r.data.errors&&r.data.errors.length){setHTMLFinal('mdPreview',masterImportPreviewFinal(state.pendingMasterImport,r.data.errors));messageFinal(byIdFinal('mdMsg'),'Import selesai dengan baris yang ditolak.','error');b.disabled=true;}else{setHTMLFinal('mdPreview',importMasterResultFinal(r.data));messageFinal(byIdFinal('mdMsg'),'Import berhasil. Data Master sudah diperbarui.','success');b.disabled=true;invalidateMasterCacheFinal();await ensureMasterCaches();refreshReorderBadge();}}catch(err){messageFinal(byIdFinal('mdMsg'),friendlyFinal(err),'error');b.disabled=false;}finally{if(!b.disabled)setBtnFinal(b,false,'Import '+schema.label);}});
+  }
+  function validateMasterImportRowsFinal(type,rows){
+    var errors=[],seen={};
+    (rows||[]).forEach(function(r,i){var rowNo=i+2;function err(m){errors.push({row:rowNo,message:m});}
+      if(type==='categories'){var n=String(r['Nama Kategori']||r['categoryName']||r['Kategori']||'').trim();if(!n)err('Nama kategori wajib diisi.');var k=n.toLowerCase();if(seen[k])err('Nama kategori duplicate di file.');seen[k]=1;}
+      else if(type==='suppliers'){var c=String(r['Kode']||r['Code']||r['code']||'').trim();var n=String(r['Nama']||r['Nama Supplier']||r['name']||'').trim();var e=String(r['Email']||r['email']||'').trim();if(!c||!n)err('Kode dan Nama supplier wajib diisi.');var ck=c.toLowerCase(),nk=n.toLowerCase();if(seen[ck])err('Kode supplier duplicate di file.');seen[ck]=1;if(e&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))err('Format email tidak valid.');if(nk.length>150)err('Nama supplier terlalu panjang.');}
+      else {var sku=String(r['SKU']||'').trim().toLowerCase(),bc=String(r['Barcode']||'').trim().toLowerCase(),name=String(r['Nama Barang']||'').trim(),cat=String(r['Kategori']||'').trim().toLowerCase(),unit=String(r['Satuan']||'').trim(),min=Number(r['Min']),max=Number(r['Max']),price=Number(r['Harga']),sup=String(r['Supplier']||'').trim().toLowerCase(),loc=String(r['Lokasi']||'').trim();if(!sku||!bc||!name||!cat||!unit||!isFinite(min)||min<0||!isFinite(max)||max<=min||!isFinite(price)||price<0||!sup||!loc)err('Data wajib, Min/Max, Harga, Kategori, Supplier, atau Lokasi tidak valid.');if(seen[sku])err('SKU duplicate di file.');if(seen[bc])err('Barcode duplicate di file.');seen[sku]=1;seen[bc]=1;if(state.categories&&!state.categories.some(function(x){return String(x.categoryName||'').trim().toLowerCase()===cat&&x.active;}))err('Kategori tidak ditemukan atau tidak aktif.');if(state.suppliers&&!state.suppliers.some(function(x){return (String(x.code||'').trim().toLowerCase()===sup||String(x.name||'').trim().toLowerCase()===sup)&&x.active;}))err('Supplier tidak ditemukan atau tidak aktif.');}
+    });return {errors:errors};
+  }
+  function masterImportPreviewFinal(rows,errors){var out='<div class="kpi-row"><div class="kpi">Baris<strong>'+fmtFinal((rows||[]).length)+'</strong></div><div class="kpi">Error<strong>'+fmtFinal((errors||[]).length)+'</strong></div></div>';if(errors&&errors.length){out+='<div class="table-wrap"><table class="data-table"><thead><tr><th>Baris</th><th>Masalah</th></tr></thead><tbody>'+errors.slice(0,100).map(function(e){return '<tr><td>'+fmtFinal(e.row)+'</td><td>'+escFinal(e.message)+'</td></tr>';}).join('')+'</tbody></table></div>';}out+='<div style="margin-top:12px">'+importPreviewFinal(rows)+'</div>';return out;}
+  function importMasterResultFinal(d){return '<div class="kpi-row"><div class="kpi">Total Baris<strong>'+fmtFinal(d.totalRows||0)+'</strong></div><div class="kpi">Dibuat<strong>'+fmtFinal(d.created||0)+'</strong></div><div class="kpi">Diperbarui<strong>'+fmtFinal(d.updated||0)+'</strong></div></div>' + ((d.errors&&d.errors.length)?'<div class="form-message error">Ada baris yang ditolak.</div>':'<div class="form-message success">Semua data berhasil diproses.</div>');}
+
   async function renderFinalImport(content){
     await ensureMasterCaches();
     await refreshProductsFinal();
@@ -2675,6 +2734,7 @@ onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult',
       listRequests: 'Approval pengajuan Staff.',
       stockReport: 'Laporan stok dan transaksi.',
       bulkUpsertProducts: 'Import Master Barang dari Excel.',
+      masterDataTransfer: 'Import dan Export Master Barang, Kategori, dan Supplier.',
       exportExcel: 'Export data ke Excel.',
       createRequest: 'Buat pengajuan barang.',
       myRequests: 'Lihat pengajuan sendiri.',
