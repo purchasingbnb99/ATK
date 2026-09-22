@@ -30,6 +30,8 @@
     approvalBadgeTimer: null,
     staffRequestCart: [],
     libraryPromises: { excel: null, scanner: null },
+    masterCacheAt: 0,
+    masterCachePromise: null,
     caches: {
       categories: [],
       suppliers: [],
@@ -763,6 +765,13 @@
         '<div class="top-use-list"><div class="panel-subtitle">Barang Paling Banyak Keluar</div>' + topUsedHtml + '</div>' +
       '</div>' +
       '</div>';
+
+    // Warm master-data cache in the background so operational modules open faster.
+    if (!state.masterCacheAt && !state.masterCachePromise) {
+      window.setTimeout(function () {
+        ensureMasterCaches().catch(function () { /* cache warming is best-effort */ });
+      }, 250);
+    }
   }
 
   async function renderCategories(content) {
@@ -876,6 +885,7 @@
         });
 
         closeModal();
+        invalidateMasterCacheFinal();
         renderPage('listCategories');
         showGlobalMessage(
           item ? 'Kategori berhasil diperbarui.' : 'Kategori berhasil ditambahkan.',
@@ -1005,6 +1015,7 @@
       try {
         await apiRequest(item ? 'updateSupplier' : 'createSupplier', data);
         closeModal();
+        invalidateMasterCacheFinal();
         renderPage('listSuppliers');
         showGlobalMessage(
           item ? 'Supplier berhasil diperbarui.' : 'Supplier berhasil ditambahkan.',
@@ -1128,6 +1139,7 @@
 
         try {
           await apiRequest('toggleProduct', { productId: id });
+          invalidateMasterCacheFinal();
           showGlobalMessage('Status barang berhasil diubah.', 'success');
           renderPage('listProducts');
         } catch (error) {
@@ -1247,6 +1259,7 @@
 
       try {
         await apiRequest(editMode ? 'updateProduct' : 'createProduct', data);
+        invalidateMasterCacheFinal();
         await stopProductScanner();
         closeModal();
         renderPage('listProducts');
@@ -1936,7 +1949,7 @@
 
   function openRequestFinal(x){if(!x)return;openModalFinal('Detail '+x.request.requestNo,'<div class="kpi-row"><div class="kpi">Status<strong>'+escFinal(x.request.status)+'</strong></div><div class="kpi">Tanggal / Jam<strong>'+escFinal(formatRequestDateTimeFinal(x.request.createdAt||x.request.requestDate))+'</strong></div><div class="kpi">Staff<strong>'+escFinal(x.request.staffName)+'</strong></div></div>'+(x.request.note?'<div class="info-strip"><strong>Catatan Umum:</strong> '+escFinal(x.request.note)+'</div>':'')+'<div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Request</th><th>Approve</th><th>Stok Request</th><th>Catatan Item</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.sku)+'</td><td>'+escFinal(i.productName)+'</td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.qtyApproved)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td>'+escFinal(i.note||'-')+'</td></tr>';}).join('')+'</tbody></table></div>'+(x.request.rejectionReason?'<div class="info-strip"><strong>Alasan Reject:</strong> '+escFinal(x.request.rejectionReason)+'</div>':'')+'','<button class="btn btn-secondary" data-close-modal>Tutup</button>');}
 
-  function openApproveFinal(x){var body='<form id="faReqForm"><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Request</th><th>Stok Saat Request</th><th>Qty Approved</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td><input class="field final-approve-qty" data-id="'+escFinal(i.requestItemId)+'" type="number" min="0" max="'+i.qtyRequested+'" step="1" value="'+i.qtyRequested+'"></td></tr>';}).join('')+'</tbody></table></div><div id="modalMessage" class="form-message hidden"></div></form>';openModalFinal('Approve '+x.request.requestNo,body,'<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="faReqForm">Approve</button>');byIdFinal('faReqForm').onsubmit=async function(e){e.preventDefault();var items=[];document.querySelectorAll('.final-approve-qty').forEach(function(i){items.push({requestItemId:i.dataset.id,qtyApproved:Number(i.value)});});var b=document.querySelector('#modalFooter .btn-primary'),m=byIdFinal('modalMessage');setBtnFinal(b,true,'Memproses...');try{await apiFinal('approveRequest',{requestId:x.request.requestId,items:items});closeModalFinal();showGlobalMessage('Pengajuan berhasil diproses.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Approve');}};}
+  function openApproveFinal(x){var body='<form id="faReqForm"><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Request</th><th>Stok Saat Request</th><th>Qty Approved</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyRequested)+'</td><td>'+fmtFinal(i.stockAtRequest)+'</td><td><input class="field final-approve-qty" data-id="'+escFinal(i.requestItemId)+'" type="number" min="0" max="'+i.qtyRequested+'" step="1" value="'+i.qtyRequested+'"></td></tr>';}).join('')+'</tbody></table></div><div id="modalMessage" class="form-message hidden"></div></form>';openModalFinal('Approve '+x.request.requestNo,body,'<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="faReqForm">Approve</button>');byIdFinal('faReqForm').onsubmit=async function(e){e.preventDefault();var items=[];document.querySelectorAll('.final-approve-qty').forEach(function(i){items.push({requestItemId:i.dataset.id,qtyApproved:Number(i.value)});});var b=document.querySelector('#modalFooter .btn-primary'),m=byIdFinal('modalMessage');setBtnFinal(b,true,'Memproses...');try{await apiFinal('approveRequest',{requestId:x.request.requestId,items:items});invalidateMasterCacheFinal();closeModalFinal();showGlobalMessage('Pengajuan berhasil diproses.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Approve');}};}
   function openRejectFinal(x){openModalFinal('Reject '+x.request.requestNo,'<form id="frRejectForm"><div class="form-group"><label>Alasan Reject</label><textarea id="frRejectReason" class="field" maxlength="500" required></textarea></div><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-danger" type="submit" form="frRejectForm">Reject</button>');byIdFinal('frRejectForm').onsubmit=async function(e){e.preventDefault();var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-danger');setBtnFinal(b,true,'Memproses...');try{await apiFinal('rejectRequest',{requestId:x.request.requestId,rejectionReason:valFinal('frRejectReason')});closeModalFinal();showGlobalMessage('Pengajuan ditolak.','success');renderPage('listRequests');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Reject');}};}
 
   async function renderFinalCreateRequest(content){
@@ -1985,18 +1998,122 @@
     };
   }
 
-  async function renderFinalReorder(content){var r=await apiFinal('reorderRecommendations',{});state.reorderFinal=r.data.items||[];content.innerHTML=pageHeaderBlock('Rekomendasi Order','Current Stock ≤ Min Stock. Recommended Qty mempertimbangkan outstanding DRAFT/ORDERED/PARTIAL.','<div class="report-actions"><button class="btn btn-secondary" id="frPrintReorder">Print / Cetak</button></div>')+'<div class="panel"><div id="reorderPrintArea"><div class="print-meta"><strong>Rekomendasi Order</strong><span>Dicetak: '+escFinal(new Date().toLocaleString('id-ID'))+'</span></div><div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Stok</th><th>Min</th><th>Max</th><th>Outstanding</th><th>Recommended</th><th>Harga</th><th class="no-print">Aksi</th></tr></thead><tbody>'+ (state.reorderFinal.length?state.reorderFinal.map(function(x){return '<tr><td><strong>'+escFinal(x.sku)+'</strong></td><td>'+escFinal(x.productName)+'</td><td>'+fmtFinal(x.currentStock)+'</td><td>'+fmtFinal(x.minStock)+'</td><td>'+fmtFinal(x.maxStock)+'</td><td>'+fmtFinal(x.outstandingOrder)+'</td><td><strong>'+fmtFinal(x.recommendedQty)+'</strong></td><td>'+moneyFinal(x.price)+'</td><td class="no-print"><button class="btn btn-primary btn-sm rfPO" data-id="'+escFinal(x.productId)+'">Buat PO</button></td></tr>';}).join(''):emptyRowFinal(9,'Tidak ada rekomendasi.'))+'</tbody></table></div></div></div>';onFinal('frPrintReorder','click',function(){printHtmlFinal('reorderPrintArea','Rekomendasi Order');});document.querySelectorAll('.rfPO').forEach(function(b){b.onclick=function(){var x=state.reorderFinal.find(function(z){return String(z.productId)===String(b.dataset.id);});openPOFinal(x);};});}
+  async function renderFinalReorder(content){
+    var r=await apiFinal('reorderRecommendations',{});
+    state.reorderFinal=r.data.items||[];
+    content.innerHTML=pageHeaderBlock('Rekomendasi Order','Recommended Qty dihitung otomatis. Order Qty dapat disesuaikan oleh Admin.','<div class="report-actions"><button class="btn btn-secondary" id="frPrintReorder">Print / Cetak</button></div>')+
+      '<div class="panel"><div id="reorderPrintArea"><div class="print-meta"><strong>Rekomendasi Order</strong><span>Dicetak: '+escFinal(nowJakartaFinal())+'</span></div>'+
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>SKU</th><th>Barang</th><th>Stok</th><th>Min</th><th>Max</th><th>Outstanding</th><th>Recommended</th><th>Order Qty</th><th>Harga</th><th class="no-print">Aksi</th></tr></thead><tbody>'+
+      (state.reorderFinal.length?state.reorderFinal.map(function(x){
+        var defaultQty=Number(x.recommendedQty||0);
+        return '<tr><td><strong>'+escFinal(x.sku)+'</strong></td><td>'+escFinal(x.productName)+'</td><td>'+fmtFinal(x.currentStock)+'</td><td>'+fmtFinal(x.minStock)+'</td><td>'+fmtFinal(x.maxStock)+'</td><td>'+fmtFinal(x.outstandingOrder)+'</td><td><strong>'+fmtFinal(x.recommendedQty)+'</strong></td><td><input class="field reorder-order-qty" type="number" min="0" step="1" value="'+escFinal(defaultQty)+'" data-id="'+escFinal(x.productId)+'" aria-label="Order Qty '+escFinal(x.productName)+'"></td><td>'+moneyFinal(x.price)+'</td><td class="no-print"><button class="btn btn-primary btn-sm rfPO" data-id="'+escFinal(x.productId)+'">Buat PO</button></td></tr>';
+      }).join(''):emptyRowFinal(10,'Tidak ada rekomendasi.'))+
+      '</tbody></table></div></div></div>';
+    onFinal('frPrintReorder','click',function(){printHtmlFinal('reorderPrintArea','Rekomendasi Order');});
+    document.querySelectorAll('.rfPO').forEach(function(b){
+      b.onclick=function(){
+        var x=state.reorderFinal.find(function(z){return String(z.productId)===String(b.dataset.id);});
+        if(!x)return;
+        var input=document.querySelector('.reorder-order-qty[data-id=\"'+String(b.dataset.id).replace(/\"/g,'')+'\"]');
+        var orderQty=input?Number(input.value):Number(x.recommendedQty||0);
+        if(!isFinite(orderQty)||orderQty<=0){showGlobalMessage('Order Qty harus lebih dari 0.','error');return;}
+        var prefill=Object.assign({},x,{orderQty:orderQty});
+        openPOFinal(prefill);
+      };
+    });
+  }
 
   async function renderFinalPO(content){var r=await apiFinal('listPurchaseOrders',{});state.finalPO=r.data.items||[];content.innerHTML=pageHeaderBlock('Purchase Order','Kelola PO dan penerimaan partial.','<button class="btn btn-primary" id="newFinalPO">+ Buat PO</button>')+'<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>No</th><th>Tanggal</th><th>Supplier</th><th>Status</th><th>Total</th><th>Items</th><th>Aksi</th></tr></thead><tbody>'+ (state.finalPO.length?state.finalPO.map(function(x){var p=x.purchaseOrder;return '<tr><td><strong>'+escFinal(p.poNo)+'</strong></td><td>'+escFinal(p.orderDate)+'</td><td>'+escFinal(p.supplierName)+'</td><td>'+statusFinal(p.status)+'</td><td>'+moneyFinal(p.totalAmount)+'</td><td>'+fmtFinal(x.items.length)+'</td><td><div class="action-group"><button class="btn btn-secondary btn-sm fpView" data-id="'+escFinal(p.poId)+'">Detail</button>'+(p.status!=='COMPLETED'&&p.status!=='CANCELLED'?'<button class="btn btn-primary btn-sm fpReceive" data-id="'+escFinal(p.poId)+'">Terima</button>':'')+(p.status==='DRAFT'?'<button class="btn btn-success btn-sm fpOrder" data-id="'+escFinal(p.poId)+'">Tandai Ordered</button>':'')+(['DRAFT','ORDERED','PARTIAL'].indexOf(p.status)>=0?'<button class="btn btn-danger btn-sm fpCancel" data-id="'+escFinal(p.poId)+'">Batalkan</button>':'')+'</div></td></tr>';}).join(''):emptyRowFinal(7,'Belum ada PO.'))+'</tbody></table></div></div>';onFinal('newFinalPO','click',function(){openPOFinal();});document.querySelectorAll('.fpView').forEach(function(b){b.onclick=function(){openPOViewFinal(state.finalPO.find(function(x){return String(x.purchaseOrder.poId)===String(b.dataset.id);}));};});document.querySelectorAll('.fpReceive').forEach(function(b){b.onclick=function(){openPOReceiptFinal(state.finalPO.find(function(x){return String(x.purchaseOrder.poId)===String(b.dataset.id);}));};});document.querySelectorAll('.fpOrder').forEach(function(b){b.onclick=function(){changePOStatusFinal(b.dataset.id,'ORDERED');};});document.querySelectorAll('.fpCancel').forEach(function(b){b.onclick=function(){if(confirm('Batalkan PO ini? PO tidak akan dihitung lagi sebagai outstanding order.'))changePOStatusFinal(b.dataset.id,'CANCELLED');};});}
 
   function openPOFinal(prefill){
     var sup=activeSupplierOptions();
-    openModalFinal('Buat Purchase Order','<form id="finalPOForm"><div class="form-grid"><div class="form-group"><label>Supplier</label><select id="fpoSupplier" class="field" required><option value="">Pilih</option>'+sup+'</select></div>'+fieldDateFinal('fpoDate','Tanggal Order')+'</div><div class="po-scan-toolbar"><button type="button" class="btn btn-secondary" id="fpoScanButton">▦ Scan Barcode Barang</button><button type="button" class="btn btn-ghost" id="fpoStartScanner">Mulai Kamera</button><button type="button" class="btn btn-ghost" id="fpoStopScanner">Stop</button></div><div id="fpoScannerPanel" class="inline-scanner hidden"><div id="fpoScannerArea" class="scanner-stage compact"></div><div id="fpoScannerMsg" class="form-message hidden"></div></div><div id="fpoItems"></div><button type="button" class="btn btn-secondary" id="addFPOItem">+ Item</button><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="finalPOForm">Buat PO</button>');
+    openModalFinal('Buat Purchase Order','<form id="finalPOForm"><div class="form-grid"><div class="form-group"><label>Supplier</label><select id="fpoSupplier" class="field" required><option value="">Pilih</option>'+sup+'</select></div>'+fieldDateFinal('fpoDate','Tanggal Order')+'</div><div class="po-scan-toolbar"><button type="button" class="btn btn-secondary" id="fpoScanButton">▦ Scan Barcode Barang</button><button type="button" class="btn btn-ghost" id="fpoStartScanner">Mulai Kamera</button><button type="button" class="btn btn-ghost" id="fpoStopScanner">Stop</button></div><div id="fpoScannerPanel" class="inline-scanner hidden"><div id="fpoScannerArea" class="scanner-stage compact"></div><div id="fpoScannerMsg" class="form-message hidden"></div></div><div class="po-items-header"><div>Barang</div><div>Qty</div><div>Harga PO</div><div>Aksi</div></div><div id="fpoItems"></div><button type="button" class="btn btn-secondary" id="addFPOItem">+ Item</button><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="finalPOForm">Buat PO</button>',{dismissOnBackdrop:false});
     if(prefill){byIdFinal('fpoSupplier').value=prefill.supplierId||'';addFPOItem(prefill);}else addFPOItem();
-    onFinal('addFPOItem','click',function(){addFPOItem();});onFinal('fpoScanButton','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});onFinal('fpoStartScanner','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});onFinal('fpoStopScanner','click',stopPOScanner);setScannerUiStateFinal('fpoStartScanner','fpoStopScanner','fpoScannerMsg',false,'Kamera nonaktif.');
-    byIdFinal('finalPOForm').onsubmit=async function(e){e.preventDefault();var its=[];document.querySelectorAll('.fpo-row').forEach(function(r){its.push({productId:r.querySelector('.fpo-product').value,qtyOrdered:r.querySelector('.fpo-qty').value,price:r.querySelector('.fpo-price').value});});var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-primary');setBtnFinal(b,true,'Menyimpan...');try{await apiFinal('createPurchaseOrder',{supplierId:valFinal('fpoSupplier'),orderDate:valFinal('fpoDate'),items:its});closeModalFinal();showGlobalMessage('PO berhasil dibuat.','success');renderPage('listPurchaseOrders');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Buat PO');}};
+    onFinal('addFPOItem','click',function(){addFPOItem();});
+    onFinal('fpoScanButton','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});
+    onFinal('fpoStartScanner','click',function(){var p=byIdFinal('fpoScannerPanel');if(p)p.classList.remove('hidden');startPOScanner();});
+    onFinal('fpoStopScanner','click',stopPOScanner);
+    setScannerUiStateFinal('fpoStartScanner','fpoStopScanner','fpoScannerMsg',false,'Kamera nonaktif.');
+    onFinal('fpoSupplier','change',function(){
+      var newSupplier=this.value;
+      var invalidRow=null;
+      document.querySelectorAll('.fpo-row').forEach(function(row){
+        var p=getPOProductFinal(row.querySelector('.fpo-product')&&row.querySelector('.fpo-product').value);
+        if(p&&p.supplierId&&newSupplier&&String(p.supplierId)!==String(newSupplier)) invalidRow=row;
+      });
+      if(invalidRow){
+        this.value='';
+        messageFinal(byIdFinal('modalMessage'),'Supplier PO tidak boleh berbeda dengan supplier Master Barang pada item yang sudah dipilih. Pilih supplier yang sesuai atau ganti barang.','warning');
+      }
+    });
+    byIdFinal('finalPOForm').onsubmit=async function(e){
+      e.preventDefault();
+      var its=[];
+      var rows=document.querySelectorAll('.fpo-row');
+      if(!rows.length){messageFinal(byIdFinal('modalMessage'),'Minimal satu item wajib.','error');return;}
+      var invalidSupplier=false;
+      rows.forEach(function(r){
+        var pid=r.querySelector('.fpo-product').value;
+        var p=getPOProductFinal(pid);
+        var selectedSupplier=valFinal('fpoSupplier');
+        if(p&&p.supplierId&&selectedSupplier&&String(p.supplierId)!==String(selectedSupplier)) invalidSupplier=true;
+        its.push({productId:pid,qtyOrdered:r.querySelector('.fpo-qty').value,price:r.querySelector('.fpo-price').value});
+      });
+      var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-primary');
+      if(invalidSupplier){messageFinal(m,'Ada barang yang supplier Master-nya berbeda dengan Supplier PO. Buat PO terpisah untuk supplier tersebut.','error');return;}
+      setBtnFinal(b,true,'Menyimpan...');
+      try{await apiFinal('createPurchaseOrder',{supplierId:valFinal('fpoSupplier'),orderDate:valFinal('fpoDate'),items:its});closeModalFinal();showGlobalMessage('PO berhasil dibuat.','success');renderPage('listPurchaseOrders');}
+      catch(err){messageFinal(m,friendlyFinal(err),'error');}
+      finally{setBtnFinal(b,false,'Buat PO');}
+    };
   }
-  function addFPOItem(prefill){var c=byIdFinal('fpoItems'),r=document.createElement('div');r.className='form-grid fpo-row';r.innerHTML='<div class="form-group"><label>Barang</label><select class="field fpo-product" required>'+productOptions()+'</select></div>'+numberClassFinal('fpo-qty','Qty',prefill?prefill.recommendedQty:1)+numberClassFinal('fpo-price','Harga',prefill?prefill.price:0)+'<div class="form-group" style="display:flex;align-items:end"><button type="button" class="btn btn-danger fpo-remove">Hapus</button></div>';c.appendChild(r);if(prefill)r.querySelector('.fpo-product').value=prefill.productId;r.querySelector('.fpo-remove').onclick=function(){r.remove();};}
+
+  function getPOProductFinal(productId){
+    return (state.products||[]).find(function(x){return String(x.productId)===String(productId);})||null;
+  }
+
+  function fillPOPriceFromMasterFinal(row){
+    var select=row&&row.querySelector('.fpo-product');
+    var price=row&&row.querySelector('.fpo-price');
+    if(!select||!price)return;
+    var p=getPOProductFinal(select.value);
+    if(p) price.value=Number(p.price||0);
+  }
+
+  function validatePOSupplierRowFinal(row){
+    var select=row&&row.querySelector('.fpo-product');
+    var supplier=byIdFinal('fpoSupplier');
+    if(!select||!supplier)return true;
+    var p=getPOProductFinal(select.value);
+    if(p&&p.supplierId&&supplier.value&&String(p.supplierId)!==String(supplier.value)){
+      messageFinal(byIdFinal('modalMessage'),'Barang '+String(p.name||p.sku||'')+' terdaftar pada supplier berbeda. Satu PO hanya boleh menggunakan satu supplier.','warning');
+      select.value='';
+      return false;
+    }
+    return true;
+  }
+
+  function addFPOItem(prefill){
+    var c=byIdFinal('fpoItems'),r=document.createElement('div');
+    r.className='po-item-grid fpo-row';
+    r.innerHTML='<div class="form-group"><select class="field fpo-product" required>'+productOptions()+'</select></div>'+
+      '<div class="form-group"><input class="field fpo-qty" type="number" min="1" step="1" value="'+escFinal(prefill&&prefill.orderQty!==undefined?prefill.orderQty:(prefill&&prefill.recommendedQty!==undefined?prefill.recommendedQty:1))+'" required></div>'+
+      '<div class="form-group"><input class="field fpo-price" type="number" min="0" step="0.01" value="'+escFinal(prefill&&prefill.price!==undefined?prefill.price:0)+'" required></div>'+
+      '<div class="form-group po-remove-cell"><button type="button" class="btn btn-danger btn-sm fpo-remove">Hapus</button></div>';
+    c.appendChild(r);
+    if(prefill)r.querySelector('.fpo-product').value=prefill.productId||'';
+    if(!prefill)fillPOPriceFromMasterFinal(r);
+    var productSelect=r.querySelector('.fpo-product');
+    productSelect.addEventListener('change',function(){
+      if(!validatePOSupplierRowFinal(r))return;
+      fillPOPriceFromMasterFinal(r);
+      var p=getPOProductFinal(this.value),sup=byIdFinal('fpoSupplier');
+      if(p&&p.supplierId&&sup&&!sup.value)sup.value=String(p.supplierId);
+    });
+    r.querySelector('.fpo-remove').onclick=function(){r.remove();};
+  }
+
+
   async function startPOScanner(){
     try{await ensureScannerLibraryFinal();}catch(loadErr){messageFinal(byIdFinal('fpoScannerMsg'),'Scanner tidak tersedia. Gunakan pilihan barang manual.','warning');return;}
     if(state.poScanner)return;
@@ -2011,16 +2128,35 @@
   }
 
   async function stopPOScanner(){if(state.poScanner){try{await state.poScanner.stop();}catch(err){}try{state.poScanner.clear();}catch(err2){}state.poScanner=null;}setScannerUiStateFinal('fpoStartScanner','fpoStopScanner','fpoScannerMsg',false,'Kamera nonaktif.');}
-  async function lookupPOBarcode(code){var clean=String(code||'').trim();if(!clean)return;try{var r=await apiFinal('searchProducts',{barcode:clean});var p=(r.data.items||[])[0];if(!p){messageFinal(byIdFinal('fpoScannerMsg'),'Barcode '+clean+' belum terdaftar di Master Barang. Tambahkan terlebih dahulu dari Master Barang.','warning');return;}var existing=null;document.querySelectorAll('.fpo-row').forEach(function(row){var select=row.querySelector('.fpo-product');if(select&&String(select.value)===String(p.productId))existing=row;});if(existing){var qty=existing.querySelector('.fpo-qty');qty.value=Number(qty.value||0)+1;}else{addFPOItem({productId:p.productId,recommendedQty:1,price:p.price||0,supplierId:p.supplierId||''});}var supplier=byIdFinal('fpoSupplier');if(supplier&&!supplier.value&&p.supplierId)supplier.value=String(p.supplierId);messageFinal(byIdFinal('fpoScannerMsg'),'Barang ditemukan: '+p.sku+' — '+p.name+'. '+(existing?'Qty ditambah 1.':'Item ditambahkan ke PO.'),'success');}catch(err){messageFinal(byIdFinal('fpoScannerMsg'),friendlyFinal(err),'error');}}
+  async function lookupPOBarcode(code){
+    var clean=String(code||'').trim();
+    if(!clean)return;
+    try{
+      var r=await apiFinal('searchProducts',{barcode:clean});
+      var p=(r.data.items||[])[0];
+      if(!p){messageFinal(byIdFinal('fpoScannerMsg'),'Barcode '+clean+' belum terdaftar di Master Barang. Tambahkan terlebih dahulu dari Master Barang.','warning');return;}
+      var supplier=byIdFinal('fpoSupplier');
+      if(supplier&&supplier.value&&p.supplierId&&String(supplier.value)!==String(p.supplierId)){
+        messageFinal(byIdFinal('fpoScannerMsg'),'Barang '+p.name+' berasal dari supplier berbeda. Satu PO hanya boleh satu supplier.','warning');
+        return;
+      }
+      var existing=null;
+      document.querySelectorAll('.fpo-row').forEach(function(row){var select=row.querySelector('.fpo-product');if(select&&String(select.value)===String(p.productId))existing=row;});
+      if(existing){var qty=existing.querySelector('.fpo-qty');qty.value=Number(qty.value||0)+1;}
+      else{addFPOItem({productId:p.productId,orderQty:1,recommendedQty:1,price:p.price||0,supplierId:p.supplierId||''});}
+      if(supplier&&!supplier.value&&p.supplierId)supplier.value=String(p.supplierId);
+      messageFinal(byIdFinal('fpoScannerMsg'),'Barang ditemukan: '+p.sku+' — '+p.name+'. '+(existing?'Qty ditambah 1.':'Item ditambahkan ke PO.'),'success');
+    }catch(err){messageFinal(byIdFinal('fpoScannerMsg'),friendlyFinal(err),'error');}
+  }
 
-  function openPOViewFinal(x){if(!x)return;openModalFinal('Detail '+x.purchaseOrder.poNo,'<div class="kpi-row"><div class="kpi">Supplier<strong>'+escFinal(x.purchaseOrder.supplierName)+'</strong></div><div class="kpi">Status<strong>'+escFinal(x.purchaseOrder.status)+'</strong></div><div class="kpi">Total<strong>'+moneyFinal(x.purchaseOrder.totalAmount)+'</strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Order</th><th>Received</th><th>Remaining</th><th>Price</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyOrdered)+'</td><td>'+fmtFinal(i.qtyReceived)+'</td><td>'+fmtFinal(i.qtyRemaining)+'</td><td>'+moneyFinal(i.price)+'</td></tr>';}).join('')+'</tbody></table></div>','<button class="btn btn-secondary" data-close-modal>Tutup</button>');}
+  function openPOViewFinal(x){if(!x)return;openModalFinal('Detail '+x.purchaseOrder.poNo,'<div class="kpi-row"><div class="kpi">Supplier<strong>'+escFinal(x.purchaseOrder.supplierName)+'</strong></div><div class="kpi">Status<strong>'+escFinal(x.purchaseOrder.status)+'</strong></div><div class="kpi">Total<strong>'+moneyFinal(x.purchaseOrder.totalAmount)+'</strong></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Order</th><th>Received</th><th>Remaining</th><th>Harga PO</th></tr></thead><tbody>'+x.items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyOrdered)+'</td><td>'+fmtFinal(i.qtyReceived)+'</td><td>'+fmtFinal(i.qtyRemaining)+'</td><td>'+moneyFinal(i.price)+'</td></tr>';}).join('')+'</tbody></table></div>','<button class="btn btn-secondary" data-close-modal>Tutup</button>');}
 
   async function changePOStatusFinal(poId,status){
     try{await apiFinal('updatePurchaseOrderStatus',{poId:poId,status:status});showGlobalMessage(status==='ORDERED'?'PO ditandai ORDERED.':'PO dibatalkan.','success');renderPage('listPurchaseOrders');}catch(err){showGlobalMessage(friendlyFinal(err),'error');}
   }
 
   async function renderFinalPOReceipt(content){var r=await apiFinal('listPurchaseOrders',{}),rows=(r.data.items||[]).filter(function(x){return ['DRAFT','ORDERED','PARTIAL'].indexOf(x.purchaseOrder.status)>=0;});content.innerHTML=pageHeaderBlock('Penerimaan PO','Terima sebagian atau seluruh qty remaining.','')+'<div class="panel">'+(rows.length?rows.map(function(x){return '<div class="status-list-row" style="margin-bottom:8px"><span><strong>'+escFinal(x.purchaseOrder.poNo)+'</strong> · '+escFinal(x.purchaseOrder.supplierName)+' · '+escFinal(x.purchaseOrder.status)+'</span><button class="btn btn-primary btn-sm fpr" data-id="'+escFinal(x.purchaseOrder.poId)+'">Terima</button></div>';}).join(''):'<div class="empty-cell">Tidak ada PO menunggu penerimaan.</div>')+'</div>';document.querySelectorAll('.fpr').forEach(function(b){b.onclick=function(){openPOReceiptFinal(rows.find(function(x){return String(x.purchaseOrder.poId)===String(b.dataset.id);}));};});}
-  function openPOReceiptFinal(x){if(!x)return;var items=x.items.filter(function(i){return i.qtyRemaining>0;});openModalFinal('Penerimaan '+x.purchaseOrder.poNo,'<form id="fprForm">'+fieldDateFinal('fprDate','Tanggal')+fieldFinal('fprDoc','Nomor Dokumen','',100,false)+'<div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Remaining</th><th>Terima</th></tr></thead><tbody>'+items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyRemaining)+'</td><td><input class="field final-pr-qty" data-id="'+escFinal(i.poItemId)+'" type="number" min="0" max="'+i.qtyRemaining+'" value="0"></td></tr>';}).join('')+'</tbody></table></div><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="fprForm">Simpan Penerimaan</button>');byIdFinal('fprForm').onsubmit=async function(e){e.preventDefault();var its=[];document.querySelectorAll('.final-pr-qty').forEach(function(i){if(Number(i.value)>0)its.push({poItemId:i.dataset.id,qtyReceived:Number(i.value)});});var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-primary');setBtnFinal(b,true,'Memproses...');try{await apiFinal('receivePurchaseOrder',{poId:x.purchaseOrder.poId,receiptDate:valFinal('fprDate'),documentNo:valFinal('fprDoc'),items:its});closeModalFinal();showGlobalMessage('Penerimaan PO berhasil.','success');renderPage('receivePurchaseOrder');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Simpan Penerimaan');}};}
+  function openPOReceiptFinal(x){if(!x)return;var items=x.items.filter(function(i){return i.qtyRemaining>0;});openModalFinal('Penerimaan '+x.purchaseOrder.poNo,'<form id="fprForm">'+fieldDateFinal('fprDate','Tanggal')+fieldFinal('fprDoc','Nomor Dokumen','',100,false)+'<div class="table-wrap"><table class="data-table"><thead><tr><th>Barang</th><th>Remaining</th><th>Terima</th></tr></thead><tbody>'+items.map(function(i){return '<tr><td>'+escFinal(i.productName)+'<div class="muted-cell">'+escFinal(i.sku)+'</div></td><td>'+fmtFinal(i.qtyRemaining)+'</td><td><input class="field final-pr-qty" data-id="'+escFinal(i.poItemId)+'" type="number" min="0" max="'+i.qtyRemaining+'" value="0"></td></tr>';}).join('')+'</tbody></table></div><div id="modalMessage" class="form-message hidden"></div></form>','<button class="btn btn-secondary" data-close-modal>Batal</button><button class="btn btn-primary" type="submit" form="fprForm">Simpan Penerimaan</button>');byIdFinal('fprForm').onsubmit=async function(e){e.preventDefault();var its=[];document.querySelectorAll('.final-pr-qty').forEach(function(i){if(Number(i.value)>0)its.push({poItemId:i.dataset.id,qtyReceived:Number(i.value)});});var m=byIdFinal('modalMessage'),b=document.querySelector('#modalFooter .btn-primary');setBtnFinal(b,true,'Memproses...');try{await apiFinal('receivePurchaseOrder',{poId:x.purchaseOrder.poId,receiptDate:valFinal('fprDate'),documentNo:valFinal('fprDoc'),items:its});invalidateMasterCacheFinal();closeModalFinal();showGlobalMessage('Penerimaan PO berhasil.','success');renderPage('receivePurchaseOrder');}catch(err){messageFinal(m,friendlyFinal(err),'error');}finally{setBtnFinal(b,false,'Simpan Penerimaan');}};}
 
   async function renderFinalReports(content){
     state.finalReportType='stock';
@@ -2181,8 +2317,46 @@ onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult',
   function productOptions(){return '<option value="">Pilih barang</option>'+activeItemsFinal(state.products).map(function(x){return '<option value="'+escFinal(x.productId)+'">'+escFinal(x.sku)+' — '+escFinal(x.name)+' (Stok '+fmtFinal(x.currentStock)+')</option>';}).join('');}
   function activeSupplierOptions(){return activeItemsFinal(state.suppliers).map(function(x){return '<option value="'+escFinal(x.supplierId)+'">'+escFinal(x.name)+' ('+escFinal(x.code)+')</option>';}).join('');}
   function activeItemsFinal(a){return (a||[]).filter(function(x){return x.active;});}
-  async function ensureMasterCaches(){var isAdmin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';if(isAdmin){var r=await Promise.all([apiFinal('listProducts',{includeInactive:false}),apiFinal('listSuppliers',{}),apiFinal('listCategories',{})]);state.products=r[0].data.items||[];state.suppliers=r[1].data.items||[];state.categories=r[2].data.items||[];return;}var rp=await apiFinal('listProducts',{includeInactive:false});state.products=rp.data.items||[];state.suppliers=[];state.categories=[];}
-  async function refreshProductsFinal(){var r=await apiFinal('listProducts',{includeInactive:true});state.products=r.data.items||[];}
+  async function ensureMasterCaches(){
+    var isAdmin=String(state.user&&state.user.role||'').toUpperCase()==='ADMIN';
+    var now=Date.now();
+    var ttl=60000;
+    var cacheReady=!!state.masterCacheAt && (now-state.masterCacheAt)<ttl && Array.isArray(state.products);
+    if(isAdmin){
+      cacheReady=cacheReady && Array.isArray(state.suppliers) && Array.isArray(state.categories);
+    }
+    if(cacheReady) return;
+    if(state.masterCachePromise) return state.masterCachePromise;
+    state.masterCachePromise=(async function(){
+      if(isAdmin){
+        var r=await Promise.all([apiFinal('listProducts',{includeInactive:false}),apiFinal('listSuppliers',{}),apiFinal('listCategories',{})]);
+        state.products=r[0].data.items||[];
+        state.caches.products=state.products.slice();
+        state.suppliers=r[1].data.items||[];
+        state.caches.suppliers=state.suppliers.slice();
+        state.categories=r[2].data.items||[];
+        state.caches.categories=state.categories.slice();
+      }else{
+        var rp=await apiFinal('listProducts',{includeInactive:false});
+        state.products=rp.data.items||[];
+        state.caches.products=state.products.slice();
+        state.suppliers=[];
+        state.categories=[];
+      }
+      state.masterCacheAt=Date.now();
+    })();
+    try{
+      await state.masterCachePromise;
+    }finally{
+      state.masterCachePromise=null;
+    }
+  }
+  async function refreshProductsFinal(){
+    var r=await apiFinal('listProducts',{includeInactive:true});
+    state.products=r.data.items||[];
+    state.caches.products=state.products.slice();
+    state.masterCacheAt=Date.now();
+  }
   function apiFinal(a,d){return apiRequest(a,d);}
   function byIdFinal(id){return document.getElementById(id)}
   function valFinal(id){var e=byIdFinal(id);return e?e.value:''}
@@ -2215,7 +2389,24 @@ onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult',
   function setBtnFinal(b,on,label){if(!b)return;b.disabled=on;b.textContent=label}
   function messageFinal(e,m,t){if(!e)return;e.className='form-message '+(t||'error');e.textContent=String(m||'');e.classList.remove('hidden')}
   function friendlyFinal(e){return e&&e.message?String(e.message):'Terjadi kesalahan server.'}
-  function openModalFinal(title,body,footer){closeModalFinal();var o=document.createElement('div');o.id='modalOverlay';o.className='modal-overlay';o.innerHTML='<div class="modal-card"><div class="modal-header"><h3>'+escFinal(title)+'</h3><button class="icon-btn" data-close-modal>×</button></div><div class="modal-body">'+body+'</div><div class="modal-footer" id="modalFooter">'+footer+'</div></div>';document.body.appendChild(o);o.querySelectorAll('[data-close-modal]').forEach(function(b){b.onclick=closeModalFinal;});o.addEventListener('click',function(e){if(e.target===o)closeModalFinal();});}
+  function openModalFinal(title,body,footer,options){
+    options=options||{};
+    closeModalFinal();
+    var o=document.createElement('div');
+    o.id='modalOverlay';
+    o.className='modal-overlay';
+    o.innerHTML='<div class="modal-card"><div class="modal-header"><h3>'+escFinal(title)+'</h3><button class="icon-btn" data-close-modal>×</button></div><div class="modal-body">'+body+'</div><div class="modal-footer" id="modalFooter">'+footer+'</div></div>';
+    document.body.appendChild(o);
+    o.querySelectorAll('[data-close-modal]').forEach(function(b){b.onclick=closeModalFinal;});
+    o.addEventListener('click',function(e){
+      if(e.target===o && options.dismissOnBackdrop!==false) closeModalFinal();
+    });
+  }
+
+  function invalidateMasterCacheFinal(){
+    state.masterCacheAt=0;
+    state.masterCachePromise=null;
+  }
   function closeModalFinal(){stopFinalScanner();stopProductScanner();stopReceiveScanner();stopPOScanner();stopOpnameScanner();var o=byIdFinal('modalOverlay');if(o)o.remove()}
   function printHtmlFinal(id,title){
     var e=byIdFinal(id);
@@ -2476,6 +2667,8 @@ onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult',
     state.expiresAt = '';
     state.user = null;
     state.staffRequestCart = [];
+    state.masterCacheAt = 0;
+    state.masterCachePromise = null;
     state.caches = {
       categories: [],
       suppliers: [],

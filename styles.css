@@ -1056,3 +1056,53 @@ body::before {
 .opname-tabs { margin-bottom:12px; }
 @media (max-width: 900px){ .stock-opname-start-grid{grid-template-columns:1fr;} .opname-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
 @media (max-width: 600px){ .opname-summary-grid{grid-template-columns:1fr 1fr;} .stock-opname-start-grid .report-actions{align-self:stretch!important;} .stock-opname-start-grid .report-actions .btn{width:100%;} }
+
+/* V3.2 - Reorder manual quantity + compact horizontal PO items */
+.reorder-order-qty {
+  width: 92px;
+  min-width: 92px;
+  text-align: right;
+}
+.po-items-header,
+.po-item-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.8fr) 110px minmax(150px, 1fr) 86px;
+  gap: 10px;
+  align-items: end;
+}
+.po-items-header {
+  margin: 12px 0 6px;
+  padding: 0 2px;
+  color: #475569;
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.po-item-grid {
+  margin-bottom: 8px;
+}
+.po-item-grid .form-group {
+  margin-bottom: 0;
+}
+.po-remove-cell {
+  display: flex;
+  align-items: flex-end;
+}
+.po-remove-cell .btn {
+  width: 100%;
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+@media (max-width: 820px) {
+  .po-items-header { display: none; }
+  .po-item-grid {
+    grid-template-columns: minmax(0, 1fr) 100px;
+  }
+  .po-item-grid .fpo-product { grid-column: 1 / -1; }
+  .po-item-grid .fpo-qty { grid-column: 1; }
+  .po-item-grid .fpo-price { grid-column: 2; }
+  .po-remove-cell { grid-column: 1 / -1; }
+  .po-remove-cell .btn { width: auto; }
+}

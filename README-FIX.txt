@@ -23,3 +23,11 @@ V2.6 update:
 11. V2.6: posisi Tanggal dipindahkan ke baris item, sejajar dengan Barang, Qty, Catatan Item, dan Hapus.
 12. V2.6: tombol Hapus diperkecil dan kolom Aksi dibuat ringkas; pada mobile layout kembali satu kolom.
 13. V2.6: jika baris pertama dihapus saat masih ada item lain, tanggal otomatis dipindahkan ke baris pertama yang tersisa.
+
+V3.2 update:
+14. Cache master data 60 detik dan background warming untuk mengurangi delay antar modul.
+15. Recommended Qty tetap otomatis; Admin dapat mengubah Order Qty sebelum membuat PO.
+16. Purchase Order item layout desktop horizontal: Barang - Qty - Harga PO - Aksi; mobile tetap responsif.
+17. Click di luar modal PO tidak menutup modal.
+18. Satu PO satu Supplier divalidasi di frontend dan backend; item dengan supplier berbeda harus masuk PO terpisah.
+19. Harga PO tetap tersimpan sebagai harga transaksi PO. Harga Master Barang menjadi harga referensi untuk PO baru; PO lama tidak berubah.
