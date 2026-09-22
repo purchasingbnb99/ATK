@@ -1,1 +1,1 @@
-3.5.0 — Compact grouped sidebar + Reorder notification badge
+3.6.0 — Tombol + Barang dipindahkan ke kolom Aksi baris terakhir dan sejajar dengan ikon hapus
