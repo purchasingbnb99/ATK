@@ -59,6 +59,7 @@
       { label: 'Laporan', icon: '▥', action: 'stockReport', section: 'laporan' },
       { label: 'Import Excel', icon: '⇧', action: 'bulkUpsertProducts', section: 'tools' },
       { label: 'Export Excel', icon: '⇩', action: 'exportExcel', section: 'tools' },
+      { label: 'Reset Data', icon: '⚠', action: 'resetAllData', section: 'tools' },
       { label: 'Change Password', icon: '⚿', action: 'changePassword', section: 'akun' }
     ],
     STAFF: [
@@ -813,6 +814,8 @@
         await renderFinalRequests(content, true);
       } else if (action === 'changePassword') {
         renderChangePassword(content);
+      } else if (action === 'resetAllData') {
+        renderResetAllDataFinal(content);
       } else {
         renderPlaceholder(content, action, title);
       }
@@ -2592,6 +2595,65 @@ onFinal('scannerScanAgain','click',function(){setTextFinal('scannerFinalResult',
 
   async function exportExcelFinal(name,rows){try{await ensureExcelLibraryFinal();}catch(err){showGlobalMessage('Library Excel tidak tersedia.','error');return;}var wb=XLSX.utils.book_new(),ws=XLSX.utils.json_to_sheet(rows||[]);XLSX.utils.book_append_sheet(wb,ws,'Data');XLSX.writeFile(wb,name+'.xlsx');}
   function exportReportFinal(d){if(!d)return;var rows=d.reportType==='requests'?(d.items||[]).map(function(x){return {requestNo:x.request.requestNo,date:x.request.requestDate,staff:x.request.staffName,status:x.request.status,items:x.items.length,rejectionReason:x.request.rejectionReason};}):d.reportType==='po'?(d.items||[]).map(function(x){return {poNo:x.purchaseOrder.poNo,date:x.purchaseOrder.orderDate,supplier:x.purchaseOrder.supplierName,status:x.purchaseOrder.status,total:x.purchaseOrder.totalAmount};}):(d.items||[]);exportExcelFinal('Laporan-'+d.reportType,rows);}
+
+
+  function renderResetAllDataFinal(content) {
+    var title = 'Reset Semua Data';
+    content.innerHTML =
+      '<div class="page-heading"><h3>' + escapeHtml(title) + '</h3>' +
+      '<p>Membersihkan seluruh data percobaan sebelum aplikasi mulai dipakai untuk data sebenarnya.</p></div>' +
+      '<div class="panel reset-danger-panel">' +
+        '<div class="panel-header"><div><h4 class="panel-title">⚠ Reset database ATK Inventory</h4>' +
+        '<p class="panel-copy">Tindakan ini bersifat permanen. Jangan gunakan setelah data produksi mulai dimasukkan.</p></div></div>' +
+        '<div class="reset-warning-box">' +
+          '<strong>Yang akan dihapus:</strong>' +
+          '<div class="reset-grid">' +
+            '<span>Master Barang</span><span>Kategori</span><span>Supplier</span><span>Pengajuan</span>' +
+            '<span>Barang Masuk</span><span>Histori Mutasi</span><span>Adjustment</span><span>Purchase Order</span>' +
+            '<span>Penerimaan PO</span><span>Stock Opname</span><span>Item transaksi</span><span>User Staff lainnya</span>' +
+          '</div>' +
+          '<p class="reset-note"><strong>Current Stock seluruh Master Barang juga akan hilang bersama data Master Barang.</strong></p>' +
+          '<p class="reset-note">Akun Admin yang sedang digunakan <strong>akan dipertahankan</strong> agar aplikasi tetap dapat digunakan. Semua akun Staff/user lainnya dihapus.</p>' +
+          '<p class="reset-note">Nomor sequence dokumen REQ, PO, GR, ADJ, dan OPN dikembalikan ke awal.</p>' +
+        '</div>' +
+        '<div id="resetDataMessage" class="form-message hidden"></div>' +
+        '<button type="button" class="btn btn-danger" id="openResetDataConfirm">Reset Semua Data Percobaan</button>' +
+      '</div>';
+
+    onFinal('openResetDataConfirm', 'click', function () {
+      openModalFinal(
+        'Konfirmasi Reset Semua Data',
+        '<div class="reset-modal-copy">' +
+          '<p><strong>PERINGATAN:</strong> seluruh data percobaan akan dihapus dan tidak dapat dipulihkan dari aplikasi.</p>' +
+          '<p>Master Barang, Kategori, Supplier, transaksi, pengajuan, PO, penerimaan, Stock Opname, dan seluruh user selain Admin yang sedang login akan dihapus.</p>' +
+          '<div class="form-group"><label for="resetConfirmInput">Ketik RESET untuk melanjutkan</label><input id="resetConfirmInput" class="field" autocomplete="off" spellcheck="false"></div>' +
+          '<div id="modalMessage" class="form-message hidden"></div>' +
+        '</div>',
+        '<button type="button" class="btn btn-secondary" data-close-modal>Batal</button><button type="button" class="btn btn-danger" id="confirmResetDataBtn">Hapus Semua Data</button>'
+      );
+      onFinal('confirmResetDataBtn', 'click', async function () {
+        var b = this;
+        var input = byIdFinal('resetConfirmInput');
+        var msg = byIdFinal('modalMessage');
+        if (!input || String(input.value || '').trim().toUpperCase() !== 'RESET') {
+          messageFinal(msg, 'Ketik RESET dengan benar untuk melanjutkan.', 'error');
+          return;
+        }
+        setBtnFinal(b, true, 'Menghapus...');
+        try {
+          var r = await apiFinal('resetAllData', { confirmation: 'RESET' });
+          closeModalFinal();
+          clearSession();
+          showLogin();
+          showGlobalMessage('Reset berhasil. Semua data percobaan sudah dikosongkan. Akun Admin tetap dipertahankan. Silakan login kembali.', 'success');
+        } catch (err) {
+          messageFinal(msg, friendlyFinal(err), 'error');
+        } finally {
+          setBtnFinal(b, false, 'Hapus Semua Data');
+        }
+      });
+    });
+  }
 
   function renderPlaceholder(content, action, title) {
     content.innerHTML =
