@@ -47,6 +47,8 @@ var ADMIN_ACTIONS = {
   receivePurchaseOrder: true,
   stockReport: true,
   bulkUpsertProducts: true,
+  bulkUpsertCategories: true,
+  bulkUpsertSuppliers: true,
   updatePurchaseOrderStatus: true,
   startStockOpname: true,
   scanStockOpnameItem: true,
@@ -544,6 +546,12 @@ function routeAction_(action, data, user) {
 
     case 'bulkUpsertProducts':
       return bulkUpsertProductsFinal_(data, user);
+
+    case 'bulkUpsertCategories':
+      return bulkUpsertCategoriesFinal_(data, user);
+
+    case 'bulkUpsertSuppliers':
+      return bulkUpsertSuppliersFinal_(data, user);
 
     case 'updatePurchaseOrderStatus':
       return updatePurchaseOrderStatusFinal_(data, user);
@@ -2793,8 +2801,141 @@ function stockReportFinal_(data,user){
 
 function receiptReportFinal_(data){var from=normalizeDateOptionalFinal_(data.dateFrom),to=normalizeDateOptionalFinal_(data.dateTo),items=[];getRowsAsObjects_(getSheet_(SHEETS.STOCK_RECEIPTS)).forEach(function(x){var d=String(x.receiptDate||'').slice(0,10);if(from&&d<from)return;if(to&&d>to)return;items.push({type:'BARANG_MASUK',receiptNo:String(x.receiptNo||''),receiptDate:d,poId:String(x.poId||''),documentNo:String(x.documentNo||''),createdBy:String(x.createdBy||''),createdAt:String(x.createdAt||'')});});getRowsAsObjects_(getSheet_(SHEETS.PURCHASE_RECEIPTS)).forEach(function(x){var d=String(x.receiptDate||'').slice(0,10);if(from&&d<from)return;if(to&&d>to)return;items.push({type:'PENERIMAAN_PO',receiptNo:String(x.receiptNo||''),receiptDate:d,poId:String(x.poId||''),documentNo:String(x.documentNo||''),createdBy:String(x.createdBy||''),createdAt:String(x.createdAt||'')});});items.sort(function(a,b){return b.createdAt.localeCompare(a.createdAt)});return {reportType:'receipts',generatedAt:nowIso_(),items:items};}
 
+function validateImportedMasterRowsFinal_(rows) {
+  if (!Array.isArray(rows) || !rows.length) {
+    throw createApiError_('VALIDATION_ERROR', 'Data import kosong.', 400);
+  }
+}
+
+function writeObjectsBatchFinal_(sheet, headers, objects) {
+  var oldDataRows = Math.max(0, sheet.getLastRow() - 1);
+  var values = objects.map(function (row) {
+    return headers.map(function (h) {
+      return row[h] === undefined || row[h] === null ? '' : row[h];
+    });
+  });
+
+  if (oldDataRows > 0) {
+    sheet.getRange(2, 1, oldDataRows, headers.length).clearContent();
+  }
+  if (values.length) {
+    var neededRows = values.length + 1 - sheet.getMaxRows();
+    if (neededRows > 0) sheet.insertRowsAfter(sheet.getMaxRows(), neededRows);
+    sheet.getRange(2, 1, values.length, headers.length).setValues(values);
+  }
+}
+
 function bulkUpsertProductsFinal_(data,user){
-  requireAdminFinal_(user);return lockRun_(function(){var rows=Array.isArray(data.rows)?data.rows:[];if(!rows.length)throw createApiError_('VALIDATION_ERROR','Data import kosong.',400);var ps=getSheet_(SHEETS.PRODUCTS),products=getRowsAsObjects_(ps),cats=getRowsAsObjects_(getSheet_(SHEETS.CATEGORIES)),sups=getRowsAsObjects_(getSheet_(SHEETS.SUPPLIERS)),bySku={},byBarcode={},cn={},sk={},seenSku={},seenBarcode={},created=0,updated=0,errors=[];products.forEach(function(x){bySku[String(x.sku||'').toLowerCase()]=x;byBarcode[String(x.barcode||'').toLowerCase()]=x});cats.forEach(function(x){cn[String(x.categoryName||'').toLowerCase()]=x});sups.forEach(function(x){sk[String(x.name||'').toLowerCase()]=x;sk[String(x.code||'').toLowerCase()]=x});rows.forEach(function(raw,index){try{var sku=String(firstValueFinal_(raw,['SKU','sku'])||'').trim().toUpperCase(),barcode=String(firstValueFinal_(raw,['Barcode','barcode'])||'').trim(),name=String(firstValueFinal_(raw,['Nama Barang','name','Name'])||'').trim(),cat=String(firstValueFinal_(raw,['Kategori','category','categoryName'])||'').trim().toLowerCase(),unit=String(firstValueFinal_(raw,['Satuan','unit'])||'').trim(),min=Number(firstValueFinal_(raw,['Min','min','minStock'])),max=Number(firstValueFinal_(raw,['Max','max','maxStock'])),price=Number(firstValueFinal_(raw,['Harga','price','Price'])),supplier=String(firstValueFinal_(raw,['Supplier','supplier','supplierName','supplierCode'])||'').trim().toLowerCase(),loc=String(firstValueFinal_(raw,['Lokasi','location'])||'').trim();if(!sku||!barcode||!name||!unit||!isFinite(min)||min<0||!isFinite(max)||max<=min||!isFinite(price)||price<0||!loc)throw new Error('Data wajib/Min-Max/Harga tidak valid.');if(seenSku[sku.toLowerCase()])throw new Error('SKU duplicate di file.');if(seenBarcode[barcode.toLowerCase()])throw new Error('Barcode duplicate di file.');seenSku[sku.toLowerCase()]=1;seenBarcode[barcode.toLowerCase()]=1;var c=cn[cat],s=sk[supplier];if(!c||!toBoolean_(c.active))throw new Error('Kategori tidak ditemukan/tidak aktif.');if(!s||!toBoolean_(s.active))throw new Error('Supplier tidak ditemukan/tidak aktif.');var a=bySku[sku.toLowerCase()]||null,b=byBarcode[barcode.toLowerCase()]||null;if(a&&b&&String(a.productId)!==String(b.productId))throw new Error('SKU dan Barcode menunjuk ke barang berbeda.');var ex=a||b,now=nowIso_();if(ex){var r=findRowById_(ps,'productId',String(ex.productId));setFieldFinal_(ps,r,'sku',sku);setFieldFinal_(ps,r,'barcode',barcode);setFieldFinal_(ps,r,'name',name);setFieldFinal_(ps,r,'categoryId',String(c.categoryId));setFieldFinal_(ps,r,'unit',unit);setFieldFinal_(ps,r,'minStock',min);setFieldFinal_(ps,r,'maxStock',max);setFieldFinal_(ps,r,'price',price);setFieldFinal_(ps,r,'supplierId',String(s.supplierId));setFieldFinal_(ps,r,'location',loc);setFieldFinal_(ps,r,'updatedAt',now);updated++;}else{var n={productId:Utilities.getUuid(),sku:sku,barcode:barcode,name:name,categoryId:String(c.categoryId),unit:unit,minStock:min,maxStock:max,currentStock:0,price:price,supplierId:String(s.supplierId),location:loc,active:true,createdAt:now,updatedAt:now};appendObjectRow_(ps,HEADERS[SHEETS.PRODUCTS],n);created++;}}catch(e){errors.push({row:index+2,message:String(e.message||'Invalid row')});}});return {totalRows:rows.length,created:created,updated:updated,errors:errors};});
+  requireAdminFinal_(user);
+  return lockRun_(function(){
+    var rows=Array.isArray(data.rows)?data.rows:[];
+    validateImportedMasterRowsFinal_(rows);
+    var ps=getSheet_(SHEETS.PRODUCTS);
+    var products=getRowsAsObjects_(ps);
+    var cats=getRowsAsObjects_(getSheet_(SHEETS.CATEGORIES));
+    var sups=getRowsAsObjects_(getSheet_(SHEETS.SUPPLIERS));
+    var cn={}, sk={}, bySku={}, byBarcode={}, seenSku={}, seenBarcode={};
+    cats.forEach(function(x){cn[String(x.categoryName||'').trim().toLowerCase()]=x;});
+    sups.forEach(function(x){sk[String(x.name||'').trim().toLowerCase()]=x;sk[String(x.code||'').trim().toLowerCase()]=x;});
+    products.forEach(function(x){if(x.sku)bySku[String(x.sku).trim().toLowerCase()]=x;if(x.barcode)byBarcode[String(x.barcode).trim().toLowerCase()]=x;});
+
+    var parsed=[],errors=[];
+    rows.forEach(function(raw,index){
+      try{
+        var sku=String(firstValueFinal_(raw,['SKU','sku'])||'').trim().toUpperCase();
+        var barcode=String(firstValueFinal_(raw,['Barcode','barcode'])||'').trim();
+        var name=String(firstValueFinal_(raw,['Nama Barang','name','Name'])||'').trim();
+        var cat=String(firstValueFinal_(raw,['Kategori','category','categoryName'])||'').trim().toLowerCase();
+        var unit=String(firstValueFinal_(raw,['Satuan','unit'])||'').trim();
+        var min=Number(firstValueFinal_(raw,['Min','min','minStock']));
+        var max=Number(firstValueFinal_(raw,['Max','max','maxStock']));
+        var price=Number(firstValueFinal_(raw,['Harga','price','Price']));
+        var supplier=String(firstValueFinal_(raw,['Supplier','supplier','supplierName','supplierCode'])||'').trim().toLowerCase();
+        var loc=String(firstValueFinal_(raw,['Lokasi','location'])||'').trim();
+        if(!sku||!barcode||!name||!unit||!isFinite(min)||min<0||!isFinite(max)||max<=min||!isFinite(price)||price<0||!loc)throw new Error('Data wajib/Min-Max/Harga tidak valid.');
+        if(seenSku[sku.toLowerCase()])throw new Error('SKU duplicate di file.');
+        if(seenBarcode[barcode.toLowerCase()])throw new Error('Barcode duplicate di file.');
+        seenSku[sku.toLowerCase()]=1;seenBarcode[barcode.toLowerCase()]=1;
+        var c=cn[cat],sp=sk[supplier];
+        if(!c||!toBoolean_(c.active))throw new Error('Kategori tidak ditemukan/tidak aktif.');
+        if(!sp||!toBoolean_(sp.active))throw new Error('Supplier tidak ditemukan/tidak aktif.');
+        var a=bySku[sku.toLowerCase()]||null,b=byBarcode[barcode.toLowerCase()]||null;
+        if(a&&b&&String(a.productId)!==String(b.productId))throw new Error('SKU dan Barcode menunjuk ke barang berbeda.');
+        parsed.push({sku:sku,barcode:barcode,name:name,categoryId:String(c.categoryId),unit:unit,minStock:min,maxStock:max,price:price,supplierId:String(sp.supplierId),location:loc,existing:(a||b||null)});
+      }catch(e){errors.push({row:index+2,message:String(e.message||'Invalid row')});}
+    });
+    if(errors.length){return {totalRows:rows.length,created:0,updated:0,errors:errors};}
+
+    var now=nowIso_();
+    var byId={};products.forEach(function(p){byId[String(p.productId)]=Object.assign({},p);});
+    var created=0,updated=0;
+    parsed.forEach(function(x){
+      var ex=x.existing;
+      if(ex){
+        var p=byId[String(ex.productId)];
+        p.sku=x.sku;p.barcode=x.barcode;p.name=x.name;p.categoryId=x.categoryId;p.unit=x.unit;p.minStock=x.minStock;p.maxStock=x.maxStock;p.price=x.price;p.supplierId=x.supplierId;p.location=x.location;p.updatedAt=now;
+        updated++;
+      }else{
+        var p={productId:Utilities.getUuid(),sku:x.sku,barcode:x.barcode,name:x.name,categoryId:x.categoryId,unit:x.unit,minStock:x.minStock,maxStock:x.maxStock,currentStock:0,price:x.price,supplierId:x.supplierId,location:x.location,active:true,createdAt:now,updatedAt:now};
+        products.push(p);byId[String(p.productId)]=p;created++;
+      }
+    });
+    writeObjectsBatchFinal_(ps,HEADERS[SHEETS.PRODUCTS],products);
+    return {totalRows:rows.length,created:created,updated:updated,errors:[]};
+  });
+}
+
+function bulkUpsertCategoriesFinal_(data,user){
+  requireAdminFinal_(user);
+  return lockRun_(function(){
+    var rows=Array.isArray(data.rows)?data.rows:[];validateImportedMasterRowsFinal_(rows);
+    var sheet=getSheet_(SHEETS.CATEGORIES),items=getRowsAsObjects_(sheet),byName={},seen={},parsed=[],errors=[];
+    items.forEach(function(x){byName[String(x.categoryName||'').trim().toLowerCase()]=x;});
+    rows.forEach(function(raw,index){try{
+      var name=String(firstValueFinal_(raw,['Nama Kategori','categoryName','Kategori','name','Name'])||'').trim();
+      if(!name)throw new Error('Nama kategori wajib diisi.');
+      if(name.length>100)throw new Error('Nama kategori maksimal 100 karakter.');
+      var key=name.toLowerCase();if(seen[key])throw new Error('Nama kategori duplicate di file.');seen[key]=1;
+      parsed.push({name:name,existing:byName[key]||null});
+    }catch(e){errors.push({row:index+2,message:String(e.message||'Invalid row')});}});
+    if(errors.length)return {totalRows:rows.length,created:0,updated:0,errors:errors};
+    var now=nowIso_(),created=0,updated=0;
+    parsed.forEach(function(x){if(x.existing){x.existing.categoryName=x.name;x.existing.updatedAt=now;updated++;}else{var n={categoryId:Utilities.getUuid(),categoryName:x.name,active:true,createdAt:now,updatedAt:now};items.push(n);created++;}});
+    items.sort(function(a,b){return String(a.categoryName||'').localeCompare(String(b.categoryName||''),'id');});
+    writeObjectsBatchFinal_(sheet,HEADERS[SHEETS.CATEGORIES],items);
+    return {totalRows:rows.length,created:created,updated:updated,errors:[]};
+  });
+}
+
+function bulkUpsertSuppliersFinal_(data,user){
+  requireAdminFinal_(user);
+  return lockRun_(function(){
+    var rows=Array.isArray(data.rows)?data.rows:[];validateImportedMasterRowsFinal_(rows);
+    var sheet=getSheet_(SHEETS.SUPPLIERS),items=getRowsAsObjects_(sheet),byCode={},seenCode={},seenName={},parsed=[],errors=[];
+    items.forEach(function(x){byCode[String(x.code||'').trim().toLowerCase()]=x;});
+    rows.forEach(function(raw,index){try{
+      var code=String(firstValueFinal_(raw,['Kode','Code','code'])||'').trim().toUpperCase();
+      var name=String(firstValueFinal_(raw,['Nama','Nama Supplier','name','Name'])||'').trim();
+      var pic=String(firstValueFinal_(raw,['PIC','pic'])||'').trim();
+      var phone=String(firstValueFinal_(raw,['Telepon','Phone','phone'])||'').trim();
+      var email=String(firstValueFinal_(raw,['Email','email'])||'').trim();
+      var address=String(firstValueFinal_(raw,['Alamat','Address','address'])||'').trim();
+      if(!code||!name)throw new Error('Kode dan Nama supplier wajib diisi.');
+      if(code.length>40||name.length>150)throw new Error('Kode/Nama supplier melebihi batas karakter.');
+      if(email&&!isValidEmail_(email))throw new Error('Format email supplier tidak valid.');
+      var ck=code.toLowerCase(),nk=name.toLowerCase();if(seenCode[ck])throw new Error('Kode supplier duplicate di file.');if(seenName[nk])throw new Error('Nama supplier duplicate di file.');seenCode[ck]=1;seenName[nk]=1;
+      var existing=byCode[ck]||null;
+      var nameConflict=items.some(function(x){return String(x.name||'').trim().toLowerCase()===nk&&(!existing||String(x.supplierId)!==String(existing.supplierId));});
+      if(nameConflict)throw new Error('Nama supplier sudah digunakan dengan kode berbeda.');
+      parsed.push({code:code,name:name,pic:pic,phone:phone,email:email,address:address,existing:existing});
+    }catch(e){errors.push({row:index+2,message:String(e.message||'Invalid row')});}});
+    if(errors.length)return {totalRows:rows.length,created:0,updated:0,errors:errors};
+    var now=nowIso_(),created=0,updated=0;
+    parsed.forEach(function(x){if(x.existing){x.existing.code=x.code;x.existing.name=x.name;x.existing.pic=x.pic;x.existing.phone=x.phone;x.existing.email=x.email;x.existing.address=x.address;x.existing.updatedAt=now;updated++;}else{items.push({supplierId:Utilities.getUuid(),code:x.code,name:x.name,pic:x.pic,phone:x.phone,email:x.email,address:x.address,active:true,createdAt:now,updatedAt:now});created++;}});
+    items.sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''),'id');});
+    writeObjectsBatchFinal_(sheet,HEADERS[SHEETS.SUPPLIERS],items);
+    return {totalRows:rows.length,created:created,updated:updated,errors:[]};
+  });
 }
 
 function dateOnlyFinal_(value){
