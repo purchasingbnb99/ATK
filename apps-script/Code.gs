@@ -56,7 +56,8 @@ var ADMIN_ACTIONS = {
   listStockOpnames: true,
   getStockOpname: true,
   listUsers: true,
-  saveUser: true
+  saveUser: true,
+  resetAllData: true
 };
 
 var AUTHENTICATED_ACTIONS = {
@@ -573,6 +574,9 @@ function routeAction_(action, data, user) {
 
     case 'saveUser':
       return saveUser_(data, user);
+
+    case 'resetAllData':
+      return resetAllDataFinal_(data, user);
 
     case 'changePassword':
       return changePassword_(data, user);
@@ -1787,6 +1791,106 @@ function jsonError_(code, message, status) {
   });
 }
 
+
+
+/**
+ * Permanently clears demo/test data while preserving the currently logged-in
+ * ADMIN account so the application remains accessible after the reset.
+ * All business/master records are cleared; the required system ADMIN account
+ * is retained as the sole user record.
+ */
+function resetAllDataFinal_(data, currentUser) {
+  requireAdminFinal_(currentUser);
+
+  var confirmation = String(data && data.confirmation || '').trim().toUpperCase();
+  if (confirmation !== 'RESET') {
+    throw createApiError_('VALIDATION_ERROR', 'Konfirmasi RESET tidak valid.', 400);
+  }
+
+  return lockRun_(function () {
+    var ss = getSpreadsheet_();
+    var userSheet = getSheet_(SHEETS.USERS);
+    var currentAdmin = rowObjectByIdFinal_(userSheet, 'userId', currentUser.userId);
+
+    if (!currentAdmin) {
+      throw createApiError_('NOT_FOUND', 'Akun Admin yang sedang digunakan tidak ditemukan.', 404);
+    }
+    if (String(currentAdmin.role || '').toUpperCase() !== 'ADMIN') {
+      throw createApiError_('FORBIDDEN', 'Hanya akun ADMIN yang dapat melakukan reset.', 403);
+    }
+
+    var sheetKeys = Object.keys(SHEETS);
+    var cleared = [];
+    for (var i = 0; i < sheetKeys.length; i++) {
+      var sheetName = SHEETS[sheetKeys[i]];
+      var sheet = getSheet_(sheetName);
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        sheet.getRange(2, 1, lastRow - 1, sheet.getMaxColumns()).clearContent();
+      }
+      cleared.push(sheetName);
+    }
+
+    // Recreate only the currently logged-in administrator so the app remains
+    // usable. All other user/master records are removed.
+    appendObjectRow_(userSheet, HEADERS[SHEETS.USERS], {
+      userId: String(currentAdmin.userId || ''),
+      username: String(currentAdmin.username || ''),
+      name: String(currentAdmin.name || ''),
+      email: String(currentAdmin.email || ''),
+      role: 'ADMIN',
+      department: String(currentAdmin.department || ''),
+      passwordSalt: String(currentAdmin.passwordSalt || ''),
+      passwordHash: String(currentAdmin.passwordHash || ''),
+      active: true,
+      createdAt: currentAdmin.createdAt || nowIso_(),
+      updatedAt: nowIso_()
+    });
+
+    // Restore required system settings only. These are application metadata,
+    // not business/master records.
+    ensureInitialSettings_();
+
+    // Reset document sequences so the real dataset can start cleanly.
+    var props = PropertiesService.getScriptProperties();
+    var allProps = props.getProperties();
+    Object.keys(allProps).forEach(function (key) {
+      if (key.indexOf('DOC_') === 0 ||
+          key.indexOf(LOGIN_FAILURE_PREFIX) === 0 ||
+          key.indexOf(SESSION_PREFIX) === 0 ||
+          key.indexOf(LOGIN_USER_CACHE_PREFIX) === 0) {
+        props.deleteProperty(key);
+      }
+    });
+
+    // Clear the Apps Script cache entries we know about.
+    try {
+      var cache = CacheService.getScriptCache();
+      var cacheKeys = [];
+      for (var j = 0; j < 100; j++) {
+        // CacheService does not expose key enumeration; remove current-admin
+        // cache explicitly and the reset will naturally repopulate it.
+        break;
+      }
+      if (currentAdmin.username) {
+        cache.remove(LOGIN_USER_CACHE_PREFIX + normalizeUsername_(currentAdmin.username));
+      }
+    } catch (cacheErr) {
+      // Cache failure must never block the reset operation.
+    }
+
+    return {
+      reset: true,
+      clearedSheets: cleared,
+      keptAdmin: {
+        username: String(currentAdmin.username || ''),
+        name: String(currentAdmin.name || '')
+      },
+      sequencesReset: true,
+      note: 'Semua data bisnis/master percobaan dihapus. Hanya akun Admin yang sedang digunakan dipertahankan agar aplikasi tetap dapat diakses.'
+    };
+  });
+}
 
 /* ============================ FINAL BUSINESS ========================= */
 
